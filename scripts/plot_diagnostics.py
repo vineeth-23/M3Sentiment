@@ -58,16 +58,23 @@ def write_svg(path, width, height, body):
         )
 
 
-def line_chart(path, title, series, y_label):
+def line_chart(path, title, series, y_label, x_domain=None, y_domain=None):
     width, height = 980, 560
     left, right, top, bottom = 80, 220, 70, 80
     plot_w = width - left - right
     plot_h = height - top - bottom
 
+    plotted_series = {}
     points = []
     for name, rows in series.items():
+        visible_rows = []
         for x, y in rows:
+            if x_domain is not None and not (x_domain[0] <= x <= x_domain[1]):
+                continue
+            visible_rows.append((x, y))
             points.append((x, y))
+        if visible_rows:
+            plotted_series[name] = visible_rows
 
     if not points:
         return False
@@ -75,7 +82,16 @@ def line_chart(path, title, series, y_label):
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
     x_map, x_min, x_max = scale(xs, left, left + plot_w)
-    y_map_raw, y_min, y_max = scale(ys, top + plot_h, top)
+    if y_domain is None:
+        y_map_raw, y_min, y_max = scale(ys, top + plot_h, top)
+    else:
+        y_min, y_max = y_domain
+        if math.isclose(y_min, y_max):
+            y_min -= 0.5
+            y_max += 0.5
+
+        def y_map_raw(value):
+            return top + plot_h - (value - y_min) * plot_h / (y_max - y_min)
 
     body = [
         svg_text(left, 35, title, size=20, weight="700"),
@@ -95,7 +111,7 @@ def line_chart(path, title, series, y_label):
         x = x_map(x_value)
         body.append(svg_text(x, top + plot_h + 24, f"{x_value:.0f}", size=11, anchor="middle", fill="#4b5563"))
 
-    for idx, (name, rows) in enumerate(series.items()):
+    for idx, (name, rows) in enumerate(plotted_series.items()):
         color = COLORS[idx % len(COLORS)]
         rows = sorted(rows)
         poly_points = " ".join(f"{x_map(x):.2f},{y_map_raw(y):.2f}" for x, y in rows)
@@ -234,7 +250,14 @@ def plot_training_metrics(csv_dir, out_dir):
                 "loss",
             )
 
-    line_chart(os.path.join(out_dir, "train_accuracy_by_model.svg"), "Training Accuracy by Model", train_acc_series, "training accuracy")
+    line_chart(
+        os.path.join(out_dir, "train_accuracy_by_model.svg"),
+        "Training Accuracy by Model (Zoomed: Epochs 5+)",
+        train_acc_series,
+        "training accuracy",
+        x_domain=(5, 40),
+        y_domain=(0.65, 0.735),
+    )
     line_chart(os.path.join(out_dir, "test_accuracy_by_model.svg"), "Test Accuracy by Model", acc_series, "accuracy")
     line_chart(os.path.join(out_dir, "test_loss_by_model.svg"), "Test Loss by Model", loss_series, "loss")
 
