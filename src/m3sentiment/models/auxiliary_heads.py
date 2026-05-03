@@ -1,49 +1,41 @@
+import math
+
 import torch
 import torch.nn as nn
-import math
+
 from m3sentiment.attention_layers import InstrumentedTransformerEncoder, InstrumentedTransformerEncoderLayer
 
 
 class PositionalEncoding(nn.Module):
     def __init__(self, hidden_dim: int, max_len: int = 50):
         super().__init__()
-        pe = torch.zeros(max_len, hidden_dim)
-        pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
-        pe[:, 0::2] = torch.sin(pos * div)
-        pe[:, 1::2] = torch.cos(pos * div)
-        self.register_buffer("pe", pe)
+        position_encoding = torch.zeros(max_len, hidden_dim)
+        position_index = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        frequency_terms = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
+        position_encoding[:, 0::2] = torch.sin(position_index * frequency_terms)
+        position_encoding[:, 1::2] = torch.cos(position_index * frequency_terms)
+        self.register_buffer("pe", position_encoding)
 
-    def forward(self, x: torch.Tensor):
-        # x: (B, T, H)
-        return x + self.pe[: x.size(1)]
+    def forward(self, sequence_states: torch.Tensor):
+        return sequence_states + self.pe[: sequence_states.size(1)]
 
 
 class ModalityTransformer(nn.Module):
-    def __init__(
-        self,
-        in_dim: int,
-        hidden_dim: int,
-        n_heads: int,
-        n_layers: int,
-        dropout: float,
-        max_len: int = 50,
-    ):
+    def __init__(self, in_dim: int, hidden_dim: int, n_heads: int, n_layers: int, dropout: float, max_len: int = 50):
         super().__init__()
         self.input_proj = nn.Linear(in_dim, hidden_dim)
         self.pos_enc = PositionalEncoding(hidden_dim, max_len)
-        layer = InstrumentedTransformerEncoderLayer(hidden_dim, n_heads, dropout)
-        self.encoder = InstrumentedTransformerEncoder(layer, num_layers=n_layers)
+        encoder_layer = InstrumentedTransformerEncoderLayer(hidden_dim, n_heads, dropout)
+        self.encoder = InstrumentedTransformerEncoder(encoder_layer, num_layers=n_layers)
 
-    def forward(self, x: torch.Tensor, return_attention: bool = False):
-        # x: (B, T, in_dim), where T is fixed (e.g., 50) and no padding
-        h = self.input_proj(x)    # (B, T, H)
-        h = self.pos_enc(h)       # add positional encoding (B, T, H)
+    def forward(self, modality_sequence: torch.Tensor, return_attention: bool = False):
+        projected_sequence = self.input_proj(modality_sequence)
+        positioned_sequence = self.pos_enc(projected_sequence)
         if return_attention:
-            h, attentions = self.encoder(h, return_attention=True)       # (B, T, H)
-            return h.mean(dim=1), attentions      # (B, H), list[(B, heads, T, T)]
-        h = self.encoder(h)       # (B, T, H)
-        return h.mean(dim=1)      # (B, H)
+            encoded_sequence, attention_maps = self.encoder(positioned_sequence, return_attention=True)
+            return encoded_sequence.mean(dim=1), attention_maps
+        encoded_sequence = self.encoder(positioned_sequence)
+        return encoded_sequence.mean(dim=1)
 
 
 class CrossModalAttentionBlock(nn.Module):
@@ -58,29 +50,24 @@ class CrossModalAttentionBlock(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, q: torch.Tensor, kv: torch.Tensor, return_attention: bool = False):
-        # q:  (B, 1, H)
-        # kv: (B, M, H)
-        attn_out, attn_weights = self.attn(
-            q, kv, kv,
+    def forward(self, query_token: torch.Tensor, context_tokens: torch.Tensor, return_attention: bool = False):
+        attention_output, attention_weights = self.attn(
+            query_token,
+            context_tokens,
+            context_tokens,
             need_weights=return_attention,
             average_attn_weights=False,
-        )    # attn_out: (B, 1, H), attn_weights: (B, heads, 1, M)
-        out = q + self.dropout(attn_out)
-        out = self.norm(out).squeeze(1)      # (B, H)
+        )
+        updated_query = query_token + self.dropout(attention_output)
+        updated_query = self.norm(updated_query).squeeze(1)
         if return_attention:
-            return out, attn_weights
-        return out
+            return updated_query, attention_weights
+        return updated_query
 
 
 class LateFusionWithCrossModalAuxHeads(nn.Module):
-    """
-    Baseline2 + Auxiliary Heads:
-     - per-modality Transformers
-     - cross-modal attention
-     - main classifier
-     - auxiliary classifiers for each unimodal representation (t, a, v)
-    """
+    """Cross-modal model with extra unimodal classifiers used only for training loss."""
+
     def __init__(
         self,
         D_text: int,
@@ -93,15 +80,12 @@ class LateFusionWithCrossModalAuxHeads(nn.Module):
         num_classes: int = 3,
     ):
         super().__init__()
-        # Per-modality sequence encoders
         self.text_enc = ModalityTransformer(D_text, hidden_dim, n_heads, n_layers, dropout)
         self.audio_enc = ModalityTransformer(D_audio, hidden_dim, n_heads, n_layers, dropout)
         self.vision_enc = ModalityTransformer(D_vision, hidden_dim, n_heads, n_layers, dropout)
 
-        # Cross-modal attention blocks
         self.cross_attn = CrossModalAttentionBlock(hidden_dim, n_heads, dropout)
 
-        # Main classification head
         self.main_classifier = nn.Sequential(
             nn.Linear(hidden_dim * 3, hidden_dim),
             nn.ReLU(),
@@ -109,8 +93,7 @@ class LateFusionWithCrossModalAuxHeads(nn.Module):
             nn.Linear(hidden_dim, num_classes),
         )
 
-        # Auxiliary classification heads for each modality
-        aux_head_hidden_dim = max(hidden_dim // 2, 1)  # Ensure positive hidden dim
+        aux_head_hidden_dim = max(hidden_dim // 2, 1)
         self.aux_classifier_text = nn.Sequential(
             nn.Linear(hidden_dim, aux_head_hidden_dim),
             nn.ReLU(),
@@ -131,56 +114,52 @@ class LateFusionWithCrossModalAuxHeads(nn.Module):
         )
 
     def forward(self, text_data, audio_data, vision_data, return_attention: bool = False):
-        # text_data, audio_data, vision_data: (B, 50, D_*)
         if return_attention:
-            t, text_attn = self.text_enc(text_data, return_attention=True)     # (B, H)
-            a, audio_attn = self.audio_enc(audio_data, return_attention=True)   # (B, H)
-            v, vision_attn = self.vision_enc(vision_data, return_attention=True) # (B, H)
+            text_summary, text_attention = self.text_enc(text_data, return_attention=True)
+            audio_summary, audio_attention = self.audio_enc(audio_data, return_attention=True)
+            vision_summary, vision_attention = self.vision_enc(vision_data, return_attention=True)
         else:
-            t = self.text_enc(text_data)     # (B, H)
-            a = self.audio_enc(audio_data)   # (B, H)
-            v = self.vision_enc(vision_data) # (B, H)
+            text_summary = self.text_enc(text_data)
+            audio_summary = self.audio_enc(audio_data)
+            vision_summary = self.vision_enc(vision_data)
 
-        # Auxiliary predictions
-        logits_text_aux = self.aux_classifier_text(t)     # (B, num_classes)
-        logits_audio_aux = self.aux_classifier_audio(a)   # (B, num_classes)
-        logits_vision_aux = self.aux_classifier_vision(v) # (B, num_classes)
+        text_aux_logits = self.aux_classifier_text(text_summary)
+        audio_aux_logits = self.aux_classifier_audio(audio_summary)
+        vision_aux_logits = self.aux_classifier_vision(vision_summary)
 
-        # Cross-modal attention
-        t_q = t.unsqueeze(1)                                # (B, 1, H)
-        a_q = a.unsqueeze(1)                                # (B, 1, H)
-        v_q = v.unsqueeze(1)                                # (B, 1, H)
+        text_query = text_summary.unsqueeze(1)
+        audio_query = audio_summary.unsqueeze(1)
+        vision_query = vision_summary.unsqueeze(1)
 
-        kv_t = torch.stack([a, v], dim=1)                   # (B, 2, H)
-        kv_a = torch.stack([t, v], dim=1)                   # (B, 2, H)
-        kv_v = torch.stack([t, a], dim=1)                   # (B, 2, H)
+        text_context = torch.stack([audio_summary, vision_summary], dim=1)
+        audio_context = torch.stack([text_summary, vision_summary], dim=1)
+        vision_context = torch.stack([text_summary, audio_summary], dim=1)
 
         if return_attention:
-            t2, attn_t = self.cross_attn(t_q, kv_t, return_attention=True)
-            a2, attn_a = self.cross_attn(a_q, kv_a, return_attention=True)
-            v2, attn_v = self.cross_attn(v_q, kv_v, return_attention=True)
+            cross_attended_text, text_cross_attention = self.cross_attn(text_query, text_context, return_attention=True)
+            cross_attended_audio, audio_cross_attention = self.cross_attn(audio_query, audio_context, return_attention=True)
+            cross_attended_vision, vision_cross_attention = self.cross_attn(vision_query, vision_context, return_attention=True)
         else:
-            t2 = self.cross_attn(t_q, kv_t)                     # (B, H)
-            a2 = self.cross_attn(a_q, kv_a)                     # (B, H)
-            v2 = self.cross_attn(v_q, kv_v)                     # (B, H)
+            cross_attended_text = self.cross_attn(text_query, text_context)
+            cross_attended_audio = self.cross_attn(audio_query, audio_context)
+            cross_attended_vision = self.cross_attn(vision_query, vision_context)
 
-        # Main prediction
-        x_fused = torch.cat([t2, a2, v2], dim=1)            # (B, 3H)
-        main_logits = self.main_classifier(x_fused)         # (B, num_classes)
+        fused_representation = torch.cat([cross_attended_text, cross_attended_audio, cross_attended_vision], dim=1)
+        main_logits = self.main_classifier(fused_representation)
 
         if return_attention:
             analysis = {
-                "features": {"text": t, "audio": a, "vision": v},
+                "features": {"text": text_summary, "audio": audio_summary, "vision": vision_summary},
                 "self_attention": {
-                    "text": text_attn,
-                    "audio": audio_attn,
-                    "vision": vision_attn,
+                    "text": text_attention,
+                    "audio": audio_attention,
+                    "vision": vision_attention,
                 },
                 "cross_attention": {
-                    "text_query": {"weights": attn_t, "keys": ["audio", "vision"]},
-                    "audio_query": {"weights": attn_a, "keys": ["text", "vision"]},
-                    "vision_query": {"weights": attn_v, "keys": ["text", "audio"]},
+                    "text_query": {"weights": text_cross_attention, "keys": ["audio", "vision"]},
+                    "audio_query": {"weights": audio_cross_attention, "keys": ["text", "vision"]},
+                    "vision_query": {"weights": vision_cross_attention, "keys": ["text", "audio"]},
                 },
             }
-            return main_logits, logits_text_aux, logits_audio_aux, logits_vision_aux, analysis
-        return main_logits, logits_text_aux, logits_audio_aux, logits_vision_aux
+            return main_logits, text_aux_logits, audio_aux_logits, vision_aux_logits, analysis
+        return main_logits, text_aux_logits, audio_aux_logits, vision_aux_logits

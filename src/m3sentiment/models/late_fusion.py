@@ -1,22 +1,23 @@
+import math
+
 import torch
 import torch.nn as nn
-import math
+
 from m3sentiment.attention_layers import InstrumentedTransformerEncoder, InstrumentedTransformerEncoderLayer
 
 
 class PositionalEncoding(nn.Module):
     def __init__(self, hidden_dim: int, max_len: int = 50):
         super().__init__()
-        pe = torch.zeros(max_len, hidden_dim)
-        pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
-        pe[:, 0::2] = torch.sin(pos * div)
-        pe[:, 1::2] = torch.cos(pos * div)
-        self.register_buffer("pe", pe)  # (max_len, hidden_dim)
+        position_encoding = torch.zeros(max_len, hidden_dim)
+        position_index = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        frequency_terms = torch.exp(torch.arange(0, hidden_dim, 2).float() * (-math.log(10000.0) / hidden_dim))
+        position_encoding[:, 0::2] = torch.sin(position_index * frequency_terms)
+        position_encoding[:, 1::2] = torch.cos(position_index * frequency_terms)
+        self.register_buffer("pe", position_encoding)
 
-    def forward(self, x: torch.Tensor):
-        # x: (B, T, hidden_dim)
-        return x + self.pe[: x.size(1)]
+    def forward(self, sequence_states: torch.Tensor):
+        return sequence_states + self.pe[: sequence_states.size(1)]
 
 
 class ModalityTransformer(nn.Module):
@@ -30,23 +31,19 @@ class ModalityTransformer(nn.Module):
         max_len: int = 50,
     ):
         super().__init__()
-        # Token embedding
         self.input_proj = nn.Linear(in_dim, hidden_dim)
-        # Positional encoding
         self.pos_enc = PositionalEncoding(hidden_dim, max_len)
-        # Transformer encoder
-        layer = InstrumentedTransformerEncoderLayer(hidden_dim, n_heads, dropout)
-        self.encoder = InstrumentedTransformerEncoder(layer, num_layers=n_layers)
+        encoder_layer = InstrumentedTransformerEncoderLayer(hidden_dim, n_heads, dropout)
+        self.encoder = InstrumentedTransformerEncoder(encoder_layer, num_layers=n_layers)
 
-    def forward(self, x: torch.Tensor, return_attention: bool = False):
-        # x: (B, T, in_dim)
-        h = self.input_proj(x)     # (B, T, H)
-        h = self.pos_enc(h)        # Add positional encoding (B, T, H)
+    def forward(self, modality_sequence: torch.Tensor, return_attention: bool = False):
+        projected_sequence = self.input_proj(modality_sequence)
+        positioned_sequence = self.pos_enc(projected_sequence)
         if return_attention:
-            h, attentions = self.encoder(h, return_attention=True)        # (B, T, H)
-            return h.mean(dim=1), attentions       # (B, H), list[(B, heads, T, T)]
-        h = self.encoder(h)        # (B, T, H)
-        return h.mean(dim=1)       # (B, H)
+            encoded_sequence, attention_maps = self.encoder(positioned_sequence, return_attention=True)
+            return encoded_sequence.mean(dim=1), attention_maps
+        encoded_sequence = self.encoder(positioned_sequence)
+        return encoded_sequence.mean(dim=1)
 
 
 class LateFusionTransformer(nn.Module):
@@ -61,20 +58,15 @@ class LateFusionTransformer(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        # Per-modality transformers
         self.text_enc = ModalityTransformer(D_text, hidden_dim, n_heads, n_layers, dropout, max_len=50)
         self.audio_enc = ModalityTransformer(D_audio, hidden_dim, n_heads, n_layers, dropout, max_len=50)
         self.vision_enc = ModalityTransformer(D_vision, hidden_dim, n_heads, n_layers, dropout, max_len=50)
 
-        # Learned modality embeddings for late fusion
-        # nn.Parameter makes them trainable parameters of the model
         self.modality_tokens = nn.Parameter(torch.randn(3, hidden_dim))
 
-        # Late-fusion transformer (3 tokens)
-        fuse_layer = InstrumentedTransformerEncoderLayer(hidden_dim, n_heads, dropout)
-        self.fusion = InstrumentedTransformerEncoder(fuse_layer, num_layers=n_layers)
+        fusion_layer = InstrumentedTransformerEncoderLayer(hidden_dim, n_heads, dropout)
+        self.fusion = InstrumentedTransformerEncoder(fusion_layer, num_layers=n_layers)
 
-        # Classification head
         self.classifier = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -83,51 +75,41 @@ class LateFusionTransformer(nn.Module):
         )
 
     def forward(self, text, audio, vision, return_attention: bool = False):
-        """
-        Args:
-          text:  (B, 50, D_text)
-          audio: (B, 50, D_audio)
-          vision:(B, 50, D_vision)
-        Returns:
-          logits: (B, 3)
-        """
-        # 1) Per-modality encoding
         if return_attention:
-            t, text_attn = self.text_enc(text, return_attention=True)       # (B, H)
-            a, audio_attn = self.audio_enc(audio, return_attention=True)     # (B, H)
-            v, vision_attn = self.vision_enc(vision, return_attention=True)  # (B, H)
+            text_summary, text_attention = self.text_enc(text, return_attention=True)
+            audio_summary, audio_attention = self.audio_enc(audio, return_attention=True)
+            vision_summary, vision_attention = self.vision_enc(vision, return_attention=True)
         else:
-            t = self.text_enc(text)       # (B, H)
-            a = self.audio_enc(audio)     # (B, H)
-            v = self.vision_enc(vision)   # (B, H)
-        features = {"text": t, "audio": a, "vision": v}
+            text_summary = self.text_enc(text)
+            audio_summary = self.audio_enc(audio)
+            vision_summary = self.vision_enc(vision)
 
-        # 2) Add modality token embeddings
-        t = t + self.modality_tokens[0]
-        a = a + self.modality_tokens[1]
-        v = v + self.modality_tokens[2]
+        features = {"text": text_summary, "audio": audio_summary, "vision": vision_summary}
 
-        # 3) Stack and fuse
-        x = torch.stack([t, a, v], dim=1)  # (B, 3, H)
+        tagged_text = text_summary + self.modality_tokens[0]
+        tagged_audio = audio_summary + self.modality_tokens[1]
+        tagged_vision = vision_summary + self.modality_tokens[2]
+
+        fusion_tokens = torch.stack([tagged_text, tagged_audio, tagged_vision], dim=1)
         if return_attention:
-            fused, fusion_attn = self.fusion(x, return_attention=True)       # (B, 3, H)
+            fused_tokens, fusion_attention = self.fusion(fusion_tokens, return_attention=True)
         else:
-            fused = self.fusion(x)             # (B, 3, H)
+            fused_tokens = self.fusion(fusion_tokens)
 
-        # 4) Pool and classify
-        pooled = fused.mean(dim=1)         # (B, H)
-        logits = self.classifier(pooled)     # (B, 3)
+        fused_summary = fused_tokens.mean(dim=1)
+        logits = self.classifier(fused_summary)
+
         if return_attention:
             analysis = {
                 "features": features,
                 "cross_attention": {},
                 "self_attention": {
-                    "text": text_attn,
-                    "audio": audio_attn,
-                    "vision": vision_attn,
+                    "text": text_attention,
+                    "audio": audio_attention,
+                    "vision": vision_attention,
                 },
                 "fusion_attention": {
-                    "weights": fusion_attn,
+                    "weights": fusion_attention,
                     "tokens": ["text", "audio", "vision"],
                 },
             }

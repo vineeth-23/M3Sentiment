@@ -21,20 +21,20 @@ class InstrumentedTransformerEncoderLayer(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
         self.activation = nn.ReLU()
 
-    def forward(self, src, return_attention=False):
-        attn_out, attn_weights = self.self_attn(
-            src,
-            src,
-            src,
+    def forward(self, sequence_states, return_attention=False):
+        attention_output, attention_weights = self.self_attn(
+            sequence_states,
+            sequence_states,
+            sequence_states,
             need_weights=return_attention,
             average_attn_weights=False,
         )
-        src = self.norm1(src + self.dropout1(attn_out))
-        ff_out = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        src = self.norm2(src + self.dropout2(ff_out))
+        sequence_states = self.norm1(sequence_states + self.dropout1(attention_output))
+        feedforward_output = self.linear2(self.dropout(self.activation(self.linear1(sequence_states))))
+        sequence_states = self.norm2(sequence_states + self.dropout2(feedforward_output))
         if return_attention:
-            return src, attn_weights
-        return src
+            return sequence_states, attention_weights
+        return sequence_states
 
 
 class InstrumentedTransformerEncoder(nn.Module):
@@ -42,15 +42,15 @@ class InstrumentedTransformerEncoder(nn.Module):
         super().__init__()
         self.layers = nn.ModuleList(copy.deepcopy(layer) for _ in range(num_layers))
 
-    def forward(self, src, return_attention=False):
-        attentions = []
-        output = src
+    def forward(self, sequence_states, return_attention=False):
+        attention_maps = []
+        output_states = sequence_states
         for layer in self.layers:
             if return_attention:
-                output, attn_weights = layer(output, return_attention=True)
-                attentions.append(attn_weights)
+                output_states, attention_weights = layer(output_states, return_attention=True)
+                attention_maps.append(attention_weights)
             else:
-                output = layer(output)
+                output_states = layer(output_states)
         if return_attention:
-            return output, attentions
-        return output
+            return output_states, attention_maps
+        return output_states

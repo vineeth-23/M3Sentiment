@@ -12,40 +12,48 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from m3sentiment.config import Config
-from m3sentiment.data_loaders import get_data_loaders
+from m3sentiment.data_loaders import build_mosei_dataloaders
 from m3sentiment.models.late_fusion import LateFusionTransformer
 from m3sentiment.models.cross_modal_attention import LateFusionWithCrossModal
 from m3sentiment.models.orthogonality import LateFusionWithCrossModalOrtho
 from m3sentiment.models.auxiliary_heads import LateFusionWithCrossModalAuxHeads
-from m3sentiment.training import train_epoch, train_epoch_ortho, train_epoch_aux
-from m3sentiment.evaluation import eval_epoch, eval_epoch_ortho, eval_epoch_aux
+from m3sentiment.training import (
+    train_auxiliary_epoch,
+    train_orthogonality_epoch,
+    train_standard_epoch,
+)
+from m3sentiment.evaluation import (
+    evaluate_auxiliary_epoch,
+    evaluate_orthogonality_epoch,
+    evaluate_standard_epoch,
+)
 from m3sentiment.diagnostics import DiagnosticRecorder
 import pandas as pd
 
 # Function to save metrics to CSV
-def dump_csv(metrics, fname):
+def write_metrics_csv(metrics, fname):
     os.makedirs(os.path.dirname(fname), exist_ok=True)
     pd.DataFrame(metrics).to_csv(fname, index=False)
 
 
-def save_model_state(model, fname):
+def save_final_model_weights(model, fname):
     os.makedirs(os.path.dirname(fname), exist_ok=True)
     torch.save(model.state_dict(), fname)
 
 
-def _torch_load(path, device):
+def _load_torch_checkpoint(path, device):
     try:
         return torch.load(path, map_location=device, weights_only=False)
     except TypeError:
         return torch.load(path, map_location=device)
 
 
-def checkpoint_path(args, model_name):
+def build_checkpoint_path(args, model_name):
     return os.path.join(args.checkpoint_dir, f"{model_name}_latest.pt")
 
 
-def save_training_checkpoint(args, model_name, epoch, model, optimizer, scheduler, metrics, batch_metrics, diagnostics):
-    path = checkpoint_path(args, model_name)
+def save_epoch_checkpoint(args, model_name, epoch, model, optimizer, scheduler, metrics, batch_metrics, diagnostics):
+    path = build_checkpoint_path(args, model_name)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(
         {
@@ -63,16 +71,16 @@ def save_training_checkpoint(args, model_name, epoch, model, optimizer, schedule
     return path
 
 
-def maybe_resume_training(args, model_name, model, optimizer, scheduler, diagnostics, device):
+def restore_training_state_if_requested(args, model_name, model, optimizer, scheduler, diagnostics, device):
     if not args.resume:
         return 1, [], []
 
-    path = args.resume_checkpoint or checkpoint_path(args, model_name)
+    path = args.resume_checkpoint or build_checkpoint_path(args, model_name)
     if not os.path.exists(path):
         print(f"No checkpoint found at {path}; starting {model_name} from epoch 1.")
         return 1, [], []
 
-    checkpoint = _torch_load(path, device)
+    checkpoint = _load_torch_checkpoint(path, device)
     model.load_state_dict(checkpoint["model_state"])
     optimizer.load_state_dict(checkpoint["optimizer_state"])
     scheduler.load_state_dict(checkpoint["scheduler_state"])
@@ -84,7 +92,7 @@ def maybe_resume_training(args, model_name, model, optimizer, scheduler, diagnos
     return last_epoch + 1, checkpoint.get("metrics", []), checkpoint.get("batch_metrics", [])
 
 
-def parse_snapshot_batches(raw):
+def parse_diagnostic_snapshot_steps(raw):
     if raw is None:
         return [1, 5, 10, 25, 50, 100, 250, 500, 1000]
     if not raw.strip():
@@ -92,7 +100,7 @@ def parse_snapshot_batches(raw):
     return [int(item.strip()) for item in raw.split(",") if item.strip()]
 
 
-def epoch_batch_averages(batch_rows, epoch, columns):
+def average_batch_columns_for_epoch(batch_rows, epoch, columns):
     rows = [row for row in batch_rows if row.get("epoch") == epoch]
     averages = {}
     for column in columns:
@@ -102,7 +110,7 @@ def epoch_batch_averages(batch_rows, epoch, columns):
     return averages
 
 
-def select_diagnostic_loader(args, train_loader, val_loader, test_loader):
+def choose_diagnostic_loader(args, train_loader, val_loader, test_loader):
     if args.diagnostics_split == "train":
         return train_loader
     if args.diagnostics_split == "val":
@@ -110,26 +118,26 @@ def select_diagnostic_loader(args, train_loader, val_loader, test_loader):
     return test_loader
 
 
-def make_diagnostics(args, model_name, loader, device):
+def create_diagnostic_recorder(args, model_name, loader, device):
     if args.no_diagnostics:
         return None
     return DiagnosticRecorder(
         model_name=model_name,
         loader=loader,
         device=device,
-        snapshot_batches=parse_snapshot_batches(args.analysis_snapshot_batches),
+        snapshot_batches=parse_diagnostic_snapshot_steps(args.analysis_snapshot_batches),
         max_batches=args.analysis_max_batches,
         split=args.diagnostics_split,
         output_dir=args.metrics_dir,
     )
 
 # Run the Late Fusion Transformer model (Baseline 1).
-def main1(cfg, data, args):
-    train_loader, val_loader, test_loader = get_data_loaders(data, cfg.train["batch_size"])
+def run_late_fusion_experiment(config, dataset_path, args):
+    train_loader, val_loader, test_loader = build_mosei_dataloaders(dataset_path, config.train["batch_size"])
 
     # Infer input dimensions from one batch
     sample = next(iter(train_loader))
-    D_text, D_audio, D_vision = (
+    text_dim, audio_dim, vision_dim = (
         sample["text"].shape[-1],
         sample["audio"].shape[-1],
         sample["vision"].shape[-1]
@@ -137,77 +145,77 @@ def main1(cfg, data, args):
 
     # Initialize the model
     model = LateFusionTransformer(
-        D_text, D_audio, D_vision,
-        hidden_dim=cfg.model["hidden_dim"],
-        n_heads=cfg.model["n_heads"],
-        n_layers=cfg.model["n_layers"],
-        dropout=cfg.model["dropout"]
+        text_dim, audio_dim, vision_dim,
+        hidden_dim=config.model["hidden_dim"],
+        n_heads=config.model["n_heads"],
+        n_layers=config.model["n_layers"],
+        dropout=config.model["dropout"]
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.train["lr"])
+    optimizer = optim.Adam(model.parameters(), lr=config.train["lr"])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
-    diagnostics_loader = select_diagnostic_loader(args, train_loader, val_loader, test_loader)
-    diagnostics = make_diagnostics(args, "baseline1", diagnostics_loader, device)
+    diagnostics_loader = choose_diagnostic_loader(args, train_loader, val_loader, test_loader)
+    diagnostics = create_diagnostic_recorder(args, "baseline1", diagnostics_loader, device)
 
-    out = []
-    batch_out = []
-    start_epoch, out, batch_out = maybe_resume_training(
+    epoch_metrics = []
+    batch_metrics = []
+    start_epoch, epoch_metrics, batch_metrics = restore_training_state_if_requested(
         args, "baseline1", model, optimizer, scheduler, diagnostics, device
     )
-    for epoch in range(start_epoch, cfg.train["epochs"] + 1):
+    for epoch in range(start_epoch, config.train["epochs"] + 1):
         # Train and evaluate
-        tr_loss, tr_acc = train_epoch(
-            model, train_loader, optimizer, criterion, device, cfg.train["max_grad_norm"],
-            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_out
+        train_loss, train_acc = train_standard_epoch(
+            model, train_loader, optimizer, criterion, device, config.train["max_grad_norm"],
+            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_metrics
         )
-        val_loss, val_acc = eval_epoch(model, val_loader, criterion, device)
-        te_loss, te_acc = eval_epoch(model, test_loader, criterion, device)
-        modality_losses = epoch_batch_averages(
-            batch_out,
+        val_loss, val_acc = evaluate_standard_epoch(model, val_loader, criterion, device)
+        test_loss, test_acc = evaluate_standard_epoch(model, test_loader, criterion, device)
+        modality_losses = average_batch_columns_for_epoch(
+            batch_metrics,
             epoch,
             ["text_only_loss", "audio_only_loss", "vision_only_loss"],
         )
 
         # Log metrics
-        out.append({
+        epoch_metrics.append({
             "epoch": epoch,
-            "train_loss": tr_loss,
-            "train_acc": tr_acc,
+            "train_loss": train_loss,
+            "train_acc": train_acc,
             **modality_losses,
             "val_loss": val_loss,
             "val_acc": val_acc,
-            "test_loss": te_loss,
-            "test_acc": te_acc
+            "test_loss": test_loss,
+            "test_acc": test_acc
         })
 
         scheduler.step(val_loss)
         if diagnostics is not None and not args.no_epoch_diagnostics:
             diagnostics.record(model, stage=f"epoch_{epoch}")
-        dump_csv(out, os.path.join(args.metrics_dir, "baseline1_metrics.csv"))
-        dump_csv(batch_out, os.path.join(args.metrics_dir, "baseline1_batch_metrics.csv"))
-        checkpoint = save_training_checkpoint(
-            args, "baseline1", epoch, model, optimizer, scheduler, out, batch_out, diagnostics
+        write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "baseline1_metrics.csv"))
+        write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "baseline1_batch_metrics.csv"))
+        checkpoint = save_epoch_checkpoint(
+            args, "baseline1", epoch, model, optimizer, scheduler, epoch_metrics, batch_metrics, diagnostics
         )
-        print(f"Epoch {epoch:02d}  train_loss={tr_loss:.4f} train_acc={tr_acc:.4f}  "
+        print(f"Epoch {epoch:02d}  train_loss={train_loss:.4f} train_acc={train_acc:.4f}  "
               f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}  checkpoint={checkpoint}")
 
     # Final evaluation and save results
-    te_loss, te_acc = eval_epoch(model, test_loader, criterion, device)
-    print(f"\nTest ▶ loss={te_loss:.4f} acc={te_acc:.4f}")
+    test_loss, test_acc = evaluate_standard_epoch(model, test_loader, criterion, device)
+    print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
     if diagnostics is not None:
         diagnostics.finalize(model)
-    save_model_state(model, os.path.join(args.model_dir, "baseline1.pth"))
-    dump_csv(out, os.path.join(args.metrics_dir, "baseline1_metrics.csv"))
-    dump_csv(batch_out, os.path.join(args.metrics_dir, "baseline1_batch_metrics.csv"))
+    save_final_model_weights(model, os.path.join(args.model_dir, "baseline1.pth"))
+    write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "baseline1_metrics.csv"))
+    write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "baseline1_batch_metrics.csv"))
 
 # Run the Late Fusion with Cross-Modal Attention model (Baseline 2).
-def main2(cfg, data, args):
-    train_loader, val_loader, test_loader = get_data_loaders(data, cfg.train["batch_size"])
+def run_cross_modal_experiment(config, dataset_path, args):
+    train_loader, val_loader, test_loader = build_mosei_dataloaders(dataset_path, config.train["batch_size"])
 
     # Infer input dimensions from one batch
     sample = next(iter(train_loader))
-    D_text, D_audio, D_vision = (
+    text_dim, audio_dim, vision_dim = (
         sample["text"].shape[-1],
         sample["audio"].shape[-1],
         sample["vision"].shape[-1]
@@ -215,236 +223,236 @@ def main2(cfg, data, args):
 
     # Initialize the model
     model = LateFusionWithCrossModal(
-        D_text, D_audio, D_vision,
-        hidden_dim=cfg.model["hidden_dim"],
-        n_heads=cfg.model["n_heads"],
-        n_layers=cfg.model["n_layers"],
-        dropout=cfg.model["dropout"]
+        text_dim, audio_dim, vision_dim,
+        hidden_dim=config.model["hidden_dim"],
+        n_heads=config.model["n_heads"],
+        n_layers=config.model["n_layers"],
+        dropout=config.model["dropout"]
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.train["lr"])
+    optimizer = optim.Adam(model.parameters(), lr=config.train["lr"])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
-    diagnostics_loader = select_diagnostic_loader(args, train_loader, val_loader, test_loader)
-    diagnostics = make_diagnostics(args, "baseline2", diagnostics_loader, device)
+    diagnostics_loader = choose_diagnostic_loader(args, train_loader, val_loader, test_loader)
+    diagnostics = create_diagnostic_recorder(args, "baseline2", diagnostics_loader, device)
 
-    out = []
-    batch_out = []
-    start_epoch, out, batch_out = maybe_resume_training(
+    epoch_metrics = []
+    batch_metrics = []
+    start_epoch, epoch_metrics, batch_metrics = restore_training_state_if_requested(
         args, "baseline2", model, optimizer, scheduler, diagnostics, device
     )
-    for epoch in range(start_epoch, cfg.train["epochs"] + 1):
+    for epoch in range(start_epoch, config.train["epochs"] + 1):
         # Train and evaluate
-        tr_loss, tr_acc = train_epoch(
-            model, train_loader, optimizer, criterion, device, cfg.train["max_grad_norm"],
-            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_out
+        train_loss, train_acc = train_standard_epoch(
+            model, train_loader, optimizer, criterion, device, config.train["max_grad_norm"],
+            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_metrics
         )
-        val_loss, val_acc = eval_epoch(model, val_loader, criterion, device)
-        te_loss, te_acc = eval_epoch(model, test_loader, criterion, device)
-        modality_losses = epoch_batch_averages(
-            batch_out,
+        val_loss, val_acc = evaluate_standard_epoch(model, val_loader, criterion, device)
+        test_loss, test_acc = evaluate_standard_epoch(model, test_loader, criterion, device)
+        modality_losses = average_batch_columns_for_epoch(
+            batch_metrics,
             epoch,
             ["text_only_loss", "audio_only_loss", "vision_only_loss"],
         )
 
         # Log metrics
-        out.append({
+        epoch_metrics.append({
             "epoch": epoch,
-            "train_loss": tr_loss,
-            "train_acc": tr_acc,
+            "train_loss": train_loss,
+            "train_acc": train_acc,
             **modality_losses,
             "val_loss": val_loss,
             "val_acc": val_acc,
-            "test_loss": te_loss,
-            "test_acc": te_acc
+            "test_loss": test_loss,
+            "test_acc": test_acc
         })
 
         scheduler.step(val_loss)
         if diagnostics is not None and not args.no_epoch_diagnostics:
             diagnostics.record(model, stage=f"epoch_{epoch}")
-        dump_csv(out, os.path.join(args.metrics_dir, "baseline2_metrics.csv"))
-        dump_csv(batch_out, os.path.join(args.metrics_dir, "baseline2_batch_metrics.csv"))
-        checkpoint = save_training_checkpoint(
-            args, "baseline2", epoch, model, optimizer, scheduler, out, batch_out, diagnostics
+        write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "baseline2_metrics.csv"))
+        write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "baseline2_batch_metrics.csv"))
+        checkpoint = save_epoch_checkpoint(
+            args, "baseline2", epoch, model, optimizer, scheduler, epoch_metrics, batch_metrics, diagnostics
         )
-        print(f"Epoch {epoch:02d}  train_loss={tr_loss:.4f} train_acc={tr_acc:.4f}  "
+        print(f"Epoch {epoch:02d}  train_loss={train_loss:.4f} train_acc={train_acc:.4f}  "
               f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}  checkpoint={checkpoint}")
 
     # Final evaluation and save results
-    te_loss, te_acc = eval_epoch(model, test_loader, criterion, device)
-    print(f"\nTest ▶ loss={te_loss:.4f} acc={te_acc:.4f}")
+    test_loss, test_acc = evaluate_standard_epoch(model, test_loader, criterion, device)
+    print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
     if diagnostics is not None:
         diagnostics.finalize(model)
-    save_model_state(model, os.path.join(args.model_dir, "baseline2.pth"))
-    dump_csv(out, os.path.join(args.metrics_dir, "baseline2_metrics.csv"))
-    dump_csv(batch_out, os.path.join(args.metrics_dir, "baseline2_batch_metrics.csv"))
+    save_final_model_weights(model, os.path.join(args.model_dir, "baseline2.pth"))
+    write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "baseline2_metrics.csv"))
+    write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "baseline2_batch_metrics.csv"))
 
 # Run the Late Fusion with Orthogonality model (Improved 1).
-def main3(cfg, data, args):
-    train_loader, val_loader, test_loader = get_data_loaders(data, cfg.train["batch_size"])
+def run_orthogonality_experiment(config, dataset_path, args):
+    train_loader, val_loader, test_loader = build_mosei_dataloaders(dataset_path, config.train["batch_size"])
 
     # Infer input dimensions
     sample = next(iter(train_loader))
-    D_text, D_audio, D_vision = (
+    text_dim, audio_dim, vision_dim = (
         sample["text"].shape[-1],
         sample["audio"].shape[-1],
         sample["vision"].shape[-1]
     )
 
     model = LateFusionWithCrossModalOrtho(
-        D_text, D_audio, D_vision,
-        hidden_dim=cfg.model["hidden_dim"],
-        n_heads=cfg.model["n_heads"],
-        n_layers=cfg.model["n_layers"],
-        dropout=cfg.model["dropout"]
+        text_dim, audio_dim, vision_dim,
+        hidden_dim=config.model["hidden_dim"],
+        n_heads=config.model["n_heads"],
+        n_layers=config.model["n_layers"],
+        dropout=config.model["dropout"]
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.train["lr"])
+    optimizer = optim.Adam(model.parameters(), lr=config.train["lr"])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
 
-    ortho_weight = cfg.train.get("ortho_weight", 0.01)
-    max_grad_norm = cfg.train.get("max_grad_norm", 1.0)
+    ortho_weight = config.train.get("ortho_weight", 0.01)
+    max_grad_norm = config.train.get("max_grad_norm", 1.0)
 
     print(f"Ortho Weight = {ortho_weight}")
-    diagnostics_loader = select_diagnostic_loader(args, train_loader, val_loader, test_loader)
-    diagnostics = make_diagnostics(args, "improved_ortho", diagnostics_loader, device)
+    diagnostics_loader = choose_diagnostic_loader(args, train_loader, val_loader, test_loader)
+    diagnostics = create_diagnostic_recorder(args, "improved_ortho", diagnostics_loader, device)
 
-    out = []
-    batch_out = []
-    start_epoch, out, batch_out = maybe_resume_training(
+    epoch_metrics = []
+    batch_metrics = []
+    start_epoch, epoch_metrics, batch_metrics = restore_training_state_if_requested(
         args, "improved_ortho", model, optimizer, scheduler, diagnostics, device
     )
-    for epoch in range(start_epoch, cfg.train["epochs"] + 1):
+    for epoch in range(start_epoch, config.train["epochs"] + 1):
         # Train and evaluate
-        tr_loss, tr_acc, cls_loss, ortho_raw, ortho = train_epoch_ortho(
+        train_loss, train_acc, classification_loss, raw_ortho_loss, weighted_ortho_loss = train_orthogonality_epoch(
             model, train_loader, optimizer, criterion, device, ortho_weight, max_grad_norm,
-            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_out
+            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_metrics
         )
-        val_loss, val_acc = eval_epoch_ortho(model, val_loader, criterion, device)
-        te_loss, te_acc = eval_epoch_ortho(model, test_loader, criterion, device)
-        modality_losses = epoch_batch_averages(
-            batch_out,
+        val_loss, val_acc = evaluate_orthogonality_epoch(model, val_loader, criterion, device)
+        test_loss, test_acc = evaluate_orthogonality_epoch(model, test_loader, criterion, device)
+        modality_losses = average_batch_columns_for_epoch(
+            batch_metrics,
             epoch,
             ["text_only_loss", "audio_only_loss", "vision_only_loss"],
         )
 
         # Log metrics
-        out.append({
+        epoch_metrics.append({
             "epoch": epoch,
-            "train_loss": tr_loss,
-            "train_acc": tr_acc,
-            "classification_loss": cls_loss,
-            "ortho_loss_raw": ortho_raw,
-            "ortho_loss_weighted": ortho,
+            "train_loss": train_loss,
+            "train_acc": train_acc,
+            "classification_loss": classification_loss,
+            "ortho_loss_raw": raw_ortho_loss,
+            "ortho_loss_weighted": weighted_ortho_loss,
             **modality_losses,
             "val_loss": val_loss,
             "val_acc": val_acc,
-            "test_loss": te_loss,
-            "test_acc": te_acc
+            "test_loss": test_loss,
+            "test_acc": test_acc
         })
 
         scheduler.step(val_loss)
         if diagnostics is not None and not args.no_epoch_diagnostics:
             diagnostics.record(model, stage=f"epoch_{epoch}")
-        dump_csv(out, os.path.join(args.metrics_dir, "ortho_metrics.csv"))
-        dump_csv(batch_out, os.path.join(args.metrics_dir, "ortho_batch_metrics.csv"))
-        checkpoint = save_training_checkpoint(
-            args, "improved_ortho", epoch, model, optimizer, scheduler, out, batch_out, diagnostics
+        write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "ortho_metrics.csv"))
+        write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "ortho_batch_metrics.csv"))
+        checkpoint = save_epoch_checkpoint(
+            args, "improved_ortho", epoch, model, optimizer, scheduler, epoch_metrics, batch_metrics, diagnostics
         )
-        print(f"Epoch {epoch:02d}  train_loss={tr_loss:.4f} train_acc={tr_acc:.4f}  "
+        print(f"Epoch {epoch:02d}  train_loss={train_loss:.4f} train_acc={train_acc:.4f}  "
               f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}  checkpoint={checkpoint}")
 
     # Final evaluation and save results
-    te_loss, te_acc = eval_epoch_ortho(model, test_loader, criterion, device)
-    print(f"\nTest ▶ loss={te_loss:.4f} acc={te_acc:.4f}")
+    test_loss, test_acc = evaluate_orthogonality_epoch(model, test_loader, criterion, device)
+    print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
     if diagnostics is not None:
         diagnostics.finalize(model)
-    save_model_state(model, os.path.join(args.model_dir, "improved_ortho.pth"))
-    dump_csv(out, os.path.join(args.metrics_dir, "ortho_metrics.csv"))
-    dump_csv(batch_out, os.path.join(args.metrics_dir, "ortho_batch_metrics.csv"))
+    save_final_model_weights(model, os.path.join(args.model_dir, "improved_ortho.pth"))
+    write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "ortho_metrics.csv"))
+    write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "ortho_batch_metrics.csv"))
 
 # Run the Late Fusion with Auxiliary Heads model (Improved 2).
-def main4(cfg, data, args):
-    train_loader, val_loader, test_loader = get_data_loaders(data, cfg.train["batch_size"])
+def run_auxiliary_experiment(config, dataset_path, args):
+    train_loader, val_loader, test_loader = build_mosei_dataloaders(dataset_path, config.train["batch_size"])
 
     # Infer input dimensions
     sample = next(iter(train_loader))
-    D_text, D_audio, D_vision = (
+    text_dim, audio_dim, vision_dim = (
         sample["text"].shape[-1],
         sample["audio"].shape[-1],
         sample["vision"].shape[-1]
     )
 
     model = LateFusionWithCrossModalAuxHeads(
-        D_text, D_audio, D_vision,
-        hidden_dim=cfg.model["hidden_dim"],
-        n_heads=cfg.model["n_heads"],
-        n_layers=cfg.model["n_layers"],
-        dropout=cfg.model["dropout"]
+        text_dim, audio_dim, vision_dim,
+        hidden_dim=config.model["hidden_dim"],
+        n_heads=config.model["n_heads"],
+        n_layers=config.model["n_layers"],
+        dropout=config.model["dropout"]
     ).to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=cfg.train["lr"])
+    optimizer = optim.Adam(model.parameters(), lr=config.train["lr"])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=2)
-    diagnostics_loader = select_diagnostic_loader(args, train_loader, val_loader, test_loader)
-    diagnostics = make_diagnostics(args, "improved_aux", diagnostics_loader, device)
+    diagnostics_loader = choose_diagnostic_loader(args, train_loader, val_loader, test_loader)
+    diagnostics = create_diagnostic_recorder(args, "improved_aux", diagnostics_loader, device)
 
-    out = []
-    batch_out = []
-    start_epoch, out, batch_out = maybe_resume_training(
+    epoch_metrics = []
+    batch_metrics = []
+    start_epoch, epoch_metrics, batch_metrics = restore_training_state_if_requested(
         args, "improved_aux", model, optimizer, scheduler, diagnostics, device
     )
-    for epoch in range(start_epoch, cfg.train["epochs"] + 1):
+    for epoch in range(start_epoch, config.train["epochs"] + 1):
         # Train and evaluate
-        tr_loss, tr_acc, main_l, text_l, audio_l, video_l, aux_weighted = train_epoch_aux(
-            model, train_loader, optimizer, criterion, device, cfg.train["aux_weight"], cfg.train["max_grad_norm"],
-            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_out
+        train_loss, train_acc, main_loss, text_aux_loss, audio_aux_loss, vision_aux_loss, weighted_aux_loss = train_auxiliary_epoch(
+            model, train_loader, optimizer, criterion, device, config.train["aux_weight"], config.train["max_grad_norm"],
+            diagnostics=diagnostics, epoch=epoch, batch_metrics=batch_metrics
         )
-        val_loss, val_acc = eval_epoch_aux(model, val_loader, criterion, device)
-        te_loss, te_acc = eval_epoch_aux(model, test_loader, criterion, device)
-        modality_losses = epoch_batch_averages(
-            batch_out,
+        val_loss, val_acc = evaluate_auxiliary_epoch(model, val_loader, criterion, device)
+        test_loss, test_acc = evaluate_auxiliary_epoch(model, test_loader, criterion, device)
+        modality_losses = average_batch_columns_for_epoch(
+            batch_metrics,
             epoch,
             ["text_only_loss", "audio_only_loss", "vision_only_loss"],
         )
 
         # Log metrics
-        out.append({
+        epoch_metrics.append({
             "epoch": epoch,
-            "train_loss": tr_loss,
-            "train_acc": tr_acc,
-            "main_loss": main_l,
-            "aux_text_loss": text_l,
-            "aux_audio_loss": audio_l,
-            "aux_video_loss": video_l,
-            "aux_loss_weighted": aux_weighted,
+            "train_loss": train_loss,
+            "train_acc": train_acc,
+            "main_loss": main_loss,
+            "aux_text_loss": text_aux_loss,
+            "aux_audio_loss": audio_aux_loss,
+            "aux_video_loss": vision_aux_loss,
+            "aux_loss_weighted": weighted_aux_loss,
             **modality_losses,
             "val_loss": val_loss,
             "val_acc": val_acc,
-            "test_loss": te_loss,
-            "test_acc": te_acc
+            "test_loss": test_loss,
+            "test_acc": test_acc
         })
 
         scheduler.step(val_loss)
         if diagnostics is not None and not args.no_epoch_diagnostics:
             diagnostics.record(model, stage=f"epoch_{epoch}")
-        dump_csv(out, os.path.join(args.metrics_dir, "aux_metrics.csv"))
-        dump_csv(batch_out, os.path.join(args.metrics_dir, "aux_batch_metrics.csv"))
-        checkpoint = save_training_checkpoint(
-            args, "improved_aux", epoch, model, optimizer, scheduler, out, batch_out, diagnostics
+        write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "aux_metrics.csv"))
+        write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "aux_batch_metrics.csv"))
+        checkpoint = save_epoch_checkpoint(
+            args, "improved_aux", epoch, model, optimizer, scheduler, epoch_metrics, batch_metrics, diagnostics
         )
-        print(f"Epoch {epoch:02d}  train_loss={tr_loss:.4f} train_acc={tr_acc:.4f}  "
+        print(f"Epoch {epoch:02d}  train_loss={train_loss:.4f} train_acc={train_acc:.4f}  "
               f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}  checkpoint={checkpoint}")
 
     # Final evaluation and save results
-    te_loss, te_acc = eval_epoch_aux(model, test_loader, criterion, device)
-    print(f"\nTest ▶ loss={te_loss:.4f} acc={te_acc:.4f}")
+    test_loss, test_acc = evaluate_auxiliary_epoch(model, test_loader, criterion, device)
+    print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
     if diagnostics is not None:
         diagnostics.finalize(model)
-    save_model_state(model, os.path.join(args.model_dir, "improved_aux.pth"))
-    dump_csv(out, os.path.join(args.metrics_dir, "aux_metrics.csv"))
-    dump_csv(batch_out, os.path.join(args.metrics_dir, "aux_batch_metrics.csv"))
+    save_final_model_weights(model, os.path.join(args.model_dir, "improved_aux.pth"))
+    write_metrics_csv(epoch_metrics, os.path.join(args.metrics_dir, "aux_metrics.csv"))
+    write_metrics_csv(batch_metrics, os.path.join(args.metrics_dir, "aux_batch_metrics.csv"))
 
 
 if __name__ == "__main__":
@@ -467,18 +475,18 @@ if __name__ == "__main__":
     parser.add_argument('--resume-checkpoint', default=None, help='Optional explicit checkpoint path to resume from')
     args = parser.parse_args()
 
-    cfg = Config(args.config)
+    config = Config(args.config)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if args.run1:
         print("Running Late Fusion Transformer (Baseline 1)")
-        main1(cfg, args.data, args)
+        run_late_fusion_experiment(config, args.data, args)
     if args.run2:
         print("Running Cross Attention Model (Baseline 2)")
-        main2(cfg, args.data, args)
+        run_cross_modal_experiment(config, args.data, args)
     if args.run3:
         print("Running Orthogonality Model (Improved 3)")
-        main3(cfg, args.data, args)
+        run_orthogonality_experiment(config, args.data, args)
     if args.run4:
         print("Running Auxiliary Heads Model (Improved 4)")
-        main4(cfg, args.data, args)
+        run_auxiliary_experiment(config, args.data, args)

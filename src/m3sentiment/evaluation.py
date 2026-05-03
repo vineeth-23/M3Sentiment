@@ -1,84 +1,82 @@
 import torch
 
-def eval_epoch(model, loader, criterion, device):
+
+def evaluate_standard_epoch(model, loader, criterion, device):
     model.eval()
     total_loss = 0.0
-    total_acc = 0
-    n_samples = 0
+    total_correct = 0
+    sample_count = 0
 
     with torch.no_grad():
         for batch in loader:
-            # Move data to the specified device
-            t = batch["text"].to(device)
-            a = batch["audio"].to(device)
-            v = batch["vision"].to(device)
-            y = batch["label3"].to(device)
+            text_batch = batch["text"].to(device)
+            audio_batch = batch["audio"].to(device)
+            vision_batch = batch["vision"].to(device)
+            labels = batch["label3"].to(device)
 
-            # Forward pass
-            logits = model(t, a, v)
-            loss = criterion(logits, y)
+            logits = model(text_batch, audio_batch, vision_batch)
+            loss = criterion(logits, labels)
 
-            # Predictions and metrics
-            preds = logits.argmax(dim=1)
-            bs = y.size(0)
-            total_loss += loss.item() * bs
-            total_acc += (preds == y).sum().item()
-            n_samples += bs
+            predictions = logits.argmax(dim=1)
+            batch_size = labels.size(0)
+            total_loss += loss.item() * batch_size
+            total_correct += (predictions == labels).sum().item()
+            sample_count += batch_size
 
-    return total_loss / n_samples, total_acc / n_samples
+    return total_loss / sample_count, total_correct / sample_count
 
 
-def eval_epoch_ortho(model, loader, criterion, device):
+def evaluate_orthogonality_epoch(model, loader, criterion, device):
     model.eval()
     total_loss = 0.0
-    total_acc = 0
-    n_samples = 0
+    total_correct = 0
+    sample_count = 0
 
     with torch.no_grad():
         for batch in loader:
-            # Move data to the specified device
-            t = batch["text"].to(device)
-            a = batch["audio"].to(device)
-            v = batch["vision"].to(device)
-            y = batch["label3"].to(device)
+            text_batch = batch["text"].to(device)
+            audio_batch = batch["audio"].to(device)
+            vision_batch = batch["vision"].to(device)
+            labels = batch["label3"].to(device)
 
-            # Forward pass with orthogonality outputs
-            logits, _, _, _ = model(t, a, v)
-            loss = criterion(logits, y)
+            logits, _, _, _ = model(text_batch, audio_batch, vision_batch)
+            loss = criterion(logits, labels)
 
-            # Predictions and metrics
-            preds = logits.argmax(dim=1)
-            bs = y.size(0)
-            total_loss += loss.item() * bs
-            total_acc += (preds == y).sum().item()
-            n_samples += bs
+            predictions = logits.argmax(dim=1)
+            batch_size = labels.size(0)
+            total_loss += loss.item() * batch_size
+            total_correct += (predictions == labels).sum().item()
+            sample_count += batch_size
 
-    return total_loss / n_samples, total_acc / n_samples
+    return total_loss / sample_count, total_correct / sample_count
 
 
-def eval_epoch_aux(model, loader, criterion, device):
+def evaluate_auxiliary_epoch(model, loader, criterion, device):
     model.eval()
     total_loss = 0.0
-    total_acc = 0
-    n_samples = 0
+    total_correct = 0
+    sample_count = 0
 
     with torch.no_grad():
         for batch in loader:
-            # Move data to the specified device
-            t = batch["text"].to(device)
-            a = batch["audio"].to(device)
-            v = batch["vision"].to(device)
-            y = batch["label3"].to(device)
+            text_batch = batch["text"].to(device)
+            audio_batch = batch["audio"].to(device)
+            vision_batch = batch["vision"].to(device)
+            labels = batch["label3"].to(device)
 
-            # Forward pass with auxiliary outputs
-            logits, _, _, _ = model(t, a, v)
-            loss = criterion(logits, y)
+            logits, _, _, _ = model(text_batch, audio_batch, vision_batch)
+            loss = criterion(logits, labels)
 
-            # Predictions and metrics
-            preds = logits.argmax(dim=1)
-            bs = y.size(0)
-            total_loss += loss.item() * bs
-            total_acc += (preds == y).sum().item()
-            n_samples += bs
+            predictions = logits.argmax(dim=1)
+            batch_size = labels.size(0)
+            total_loss += loss.item() * batch_size
+            total_correct += (predictions == labels).sum().item()
+            sample_count += batch_size
 
-    return total_loss / n_samples, total_acc / n_samples
+    return total_loss / sample_count, total_correct / sample_count
+
+
+# Backward-compatible aliases for older notebooks or scripts.
+eval_epoch = evaluate_standard_epoch
+eval_epoch_ortho = evaluate_orthogonality_epoch
+eval_epoch_aux = evaluate_auxiliary_epoch

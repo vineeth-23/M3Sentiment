@@ -6,26 +6,26 @@ import torch
 import torch.nn.functional as F
 
 
-def _extract_analysis(model_output):
+def _extract_analysis_payload(model_output):
     if isinstance(model_output, tuple) and model_output and isinstance(model_output[-1], dict):
         return model_output[-1]
     return {}
 
 
-def _add_weighted(total, count, key, value, weight):
+def _accumulate_weighted_metric(total, count, key, value, weight):
     total[key] += float(value) * weight
     count[key] += weight
 
 
-def _orthogonality_batch_stats(features):
-    t_feat = F.normalize(features["text"], p=2, dim=1)
-    a_feat = F.normalize(features["audio"], p=2, dim=1)
-    v_feat = F.normalize(features["vision"], p=2, dim=1)
+def _compute_representation_similarity_metrics(features):
+    text_features = F.normalize(features["text"], p=2, dim=1)
+    audio_features = F.normalize(features["audio"], p=2, dim=1)
+    vision_features = F.normalize(features["vision"], p=2, dim=1)
 
     pairs = {
-        "text_audio": (t_feat * a_feat).sum(dim=1),
-        "text_vision": (t_feat * v_feat).sum(dim=1),
-        "audio_vision": (a_feat * v_feat).sum(dim=1),
+        "text_audio": (text_features * audio_features).sum(dim=1),
+        "text_vision": (text_features * vision_features).sum(dim=1),
+        "audio_vision": (audio_features * vision_features).sum(dim=1),
     }
 
     stats = {}
@@ -39,14 +39,14 @@ def _orthogonality_batch_stats(features):
     return stats
 
 
-def _attention_entropy(weights):
+def _compute_attention_entropy(weights):
     weights = weights.clamp_min(1e-12)
     return -(weights * weights.log()).sum(dim=-1)
 
 
-def _record_sequence_attention_stats(totals, counts, weights, batch_size, category, modality, layer_idx):
+def _record_within_sequence_attention_metrics(totals, counts, weights, batch_size, category, modality, layer_idx):
     # weights: (B, heads, T, T). Diagonal means a token attends to itself.
-    entropy = _attention_entropy(weights)
+    entropy = _compute_attention_entropy(weights)
     diagonal = weights.diagonal(dim1=-2, dim2=-1).mean(dim=-1)
     token_count = weights.size(-1)
     if token_count > 1:
@@ -62,7 +62,7 @@ def _record_sequence_attention_stats(totals, counts, weights, batch_size, catego
     }
 
     for metric, values in metrics.items():
-        _add_weighted(
+        _accumulate_weighted_metric(
             totals,
             counts,
             (category, metric, modality, str(layer_idx), "all", ""),
@@ -70,7 +70,7 @@ def _record_sequence_attention_stats(totals, counts, weights, batch_size, catego
             batch_size,
         )
         for head_idx in range(weights.size(1)):
-            _add_weighted(
+            _accumulate_weighted_metric(
                 totals,
                 counts,
                 (category, metric, modality, str(layer_idx), str(head_idx), ""),
@@ -79,12 +79,12 @@ def _record_sequence_attention_stats(totals, counts, weights, batch_size, catego
             )
 
 
-def _record_token_attention_stats(totals, counts, weights, tokens, batch_size, category, layer_idx):
+def _record_modality_token_attention_metrics(totals, counts, weights, tokens, batch_size, category, layer_idx):
     # weights: (B, heads, Q, K). Mean over queries gives attention paid to each token.
-    entropy = _attention_entropy(weights)
+    entropy = _compute_attention_entropy(weights)
     mean_by_key = weights.mean(dim=2)
 
-    _add_weighted(
+    _accumulate_weighted_metric(
         totals,
         counts,
         (category, "mean_entropy", "all_queries", str(layer_idx), "all", ""),
@@ -93,7 +93,7 @@ def _record_token_attention_stats(totals, counts, weights, tokens, batch_size, c
     )
 
     for token_idx, token in enumerate(tokens):
-        _add_weighted(
+        _accumulate_weighted_metric(
             totals,
             counts,
             (category, "mean_attention", "all_queries", str(layer_idx), "all", token),
@@ -101,7 +101,7 @@ def _record_token_attention_stats(totals, counts, weights, tokens, batch_size, c
             batch_size,
         )
         for head_idx in range(weights.size(1)):
-            _add_weighted(
+            _accumulate_weighted_metric(
                 totals,
                 counts,
                 (category, "mean_attention", "all_queries", str(layer_idx), str(head_idx), token),
@@ -110,7 +110,7 @@ def _record_token_attention_stats(totals, counts, weights, tokens, batch_size, c
             )
 
 
-def analyze_model(model, loader, device, split="analysis", stage="final", global_step=None, max_batches=5):
+def collect_model_diagnostics(model, loader, device, split="analysis", stage="final", global_step=None, max_batches=5):
     was_training = model.training
     model.eval()
 
@@ -128,16 +128,16 @@ def analyze_model(model, loader, device, split="analysis", stage="final", global
             batch_size = text.size(0)
 
             output = model(text, audio, vision, return_attention=True)
-            analysis = _extract_analysis(output)
+            analysis = _extract_analysis_payload(output)
 
             features = analysis.get("features")
             if features:
-                for metric, value in _orthogonality_batch_stats(features).items():
-                    _add_weighted(totals, counts, ("orthogonality", metric, "", "", "", ""), value.item(), batch_size)
+                for metric, value in _compute_representation_similarity_metrics(features).items():
+                    _accumulate_weighted_metric(totals, counts, ("orthogonality", metric, "", "", "", ""), value.item(), batch_size)
 
             for modality, layer_attentions in analysis.get("self_attention", {}).items():
                 for layer_idx, weights in enumerate(layer_attentions):
-                    _record_sequence_attention_stats(
+                    _record_within_sequence_attention_metrics(
                         totals,
                         counts,
                         weights.detach(),
@@ -150,7 +150,7 @@ def analyze_model(model, loader, device, split="analysis", stage="final", global
             fusion_info = analysis.get("fusion_attention")
             if fusion_info:
                 for layer_idx, weights in enumerate(fusion_info["weights"]):
-                    _record_token_attention_stats(
+                    _record_modality_token_attention_metrics(
                         totals,
                         counts,
                         weights.detach(),
@@ -172,8 +172,8 @@ def analyze_model(model, loader, device, split="analysis", stage="final", global
                 # (B, heads, 1, modalities) -> (B, heads, modalities)
                 weights = weights.squeeze(2)
 
-                entropy = _attention_entropy(weights)
-                _add_weighted(
+                entropy = _compute_attention_entropy(weights)
+                _accumulate_weighted_metric(
                     totals,
                     counts,
                     ("attention_entropy", "mean_entropy", query_name, "", "all", ""),
@@ -183,7 +183,7 @@ def analyze_model(model, loader, device, split="analysis", stage="final", global
 
                 for key_idx, modality in enumerate(keys):
                     overall_value = weights[:, :, key_idx].mean().item()
-                    _add_weighted(
+                    _accumulate_weighted_metric(
                         totals,
                         counts,
                         ("cross_attention_overall", "mean_attention", query_name, "", "all", modality),
@@ -193,7 +193,7 @@ def analyze_model(model, loader, device, split="analysis", stage="final", global
 
                     for head_idx in range(weights.size(1)):
                         head_value = weights[:, head_idx, key_idx].mean().item()
-                        _add_weighted(
+                        _accumulate_weighted_metric(
                             totals,
                             counts,
                             ("cross_attention_head", "mean_attention", query_name, "", str(head_idx), modality),
@@ -223,13 +223,13 @@ def analyze_model(model, loader, device, split="analysis", stage="final", global
     return rows
 
 
-def save_diagnostics(rows, out_path):
+def write_diagnostic_rows(rows, out_path):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     pd.DataFrame(rows).to_csv(out_path, index=False)
 
 
-def run_diagnostics(model, loader, device, model_name, stage, split="test", global_step=None, max_batches=5, output_dir="outputs/metrics"):
-    rows = analyze_model(
+def run_diagnostic_pass(model, loader, device, model_name, stage, split="test", global_step=None, max_batches=5, output_dir="outputs/metrics"):
+    rows = collect_model_diagnostics(
         model,
         loader,
         device,
@@ -239,7 +239,7 @@ def run_diagnostics(model, loader, device, model_name, stage, split="test", glob
         max_batches=max_batches,
     )
     out_path = os.path.join(output_dir, "diagnostics", f"{model_name}_{stage}_{split}.csv")
-    save_diagnostics(rows, out_path)
+    write_diagnostic_rows(rows, out_path)
     return out_path
 
 
@@ -261,7 +261,7 @@ class DiagnosticRecorder:
             self.record(model, stage=f"batch_{self.global_step}")
 
     def record(self, model, stage):
-        path = run_diagnostics(
+        path = run_diagnostic_pass(
             model,
             self.loader,
             self.device,
@@ -276,7 +276,7 @@ class DiagnosticRecorder:
         return path
 
     def finalize(self, model):
-        path = run_diagnostics(
+        path = run_diagnostic_pass(
             model,
             self.loader,
             self.device,
@@ -289,3 +289,9 @@ class DiagnosticRecorder:
         )
         self.paths.append(path)
         return path
+
+
+# Backward-compatible aliases for older notebooks or scripts.
+analyze_model = collect_model_diagnostics
+save_diagnostics = write_diagnostic_rows
+run_diagnostics = run_diagnostic_pass
