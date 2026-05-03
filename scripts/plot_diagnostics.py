@@ -219,6 +219,7 @@ def plot_training_metrics(csv_dir, out_dir):
         "auxiliary": "aux_metrics.csv",
     }
     train_acc_series = {}
+    validation_acc_series = {}
     acc_series = {}
     loss_series = {}
 
@@ -229,6 +230,8 @@ def plot_training_metrics(csv_dir, out_dir):
         rows = read_csv(path)
         if rows and "train_acc" in rows[0]:
             train_acc_series[name] = [(to_float(r["epoch"]), to_float(r["train_acc"])) for r in rows]
+        if rows and "val_acc" in rows[0]:
+            validation_acc_series[name] = [(to_float(r["epoch"]), to_float(r["val_acc"])) for r in rows]
         if rows and "test_acc" in rows[0]:
             acc_series[f"{name} test"] = [(to_float(r["epoch"]), to_float(r["test_acc"])) for r in rows]
         if rows and "test_loss" in rows[0]:
@@ -257,6 +260,12 @@ def plot_training_metrics(csv_dir, out_dir):
         "training accuracy",
         x_domain=(5, 40),
         y_domain=(0.65, 0.735),
+    )
+    line_chart(
+        os.path.join(out_dir, "validation_accuracy_by_model.svg"),
+        "Validation Accuracy by Model",
+        validation_acc_series,
+        "validation accuracy",
     )
     line_chart(os.path.join(out_dir, "test_accuracy_by_model.svg"), "Test Accuracy by Model", acc_series, "accuracy")
     line_chart(os.path.join(out_dir, "test_loss_by_model.svg"), "Test Loss by Model", loss_series, "loss")
