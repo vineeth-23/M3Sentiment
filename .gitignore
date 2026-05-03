@@ -1,0 +1,15 @@
+env/
+CMU-MultimodelSDK/
+mosei_data/
+venv*/
+**/**/*.ipynb
+**/**/*.npy
+**/**/*.pth
+*.pt
+.DS_Store
+__pycache__/
+csv/
+*.csv
+*.pkl
+outputs/plots/Imagess/
+outputs/plots/plots/
