@@ -202,6 +202,7 @@ def plot_training_metrics(csv_dir, out_dir):
         "orthogonality": "ortho_metrics.csv",
         "auxiliary": "aux_metrics.csv",
     }
+    train_acc_series = {}
     acc_series = {}
     loss_series = {}
 
@@ -210,6 +211,8 @@ def plot_training_metrics(csv_dir, out_dir):
         if not os.path.exists(path):
             continue
         rows = read_csv(path)
+        if rows and "train_acc" in rows[0]:
+            train_acc_series[name] = [(to_float(r["epoch"]), to_float(r["train_acc"])) for r in rows]
         if rows and "test_acc" in rows[0]:
             acc_series[f"{name} test"] = [(to_float(r["epoch"]), to_float(r["test_acc"])) for r in rows]
         if rows and "test_loss" in rows[0]:
@@ -231,6 +234,7 @@ def plot_training_metrics(csv_dir, out_dir):
                 "loss",
             )
 
+    line_chart(os.path.join(out_dir, "train_accuracy_by_model.svg"), "Training Accuracy by Model", train_acc_series, "training accuracy")
     line_chart(os.path.join(out_dir, "test_accuracy_by_model.svg"), "Test Accuracy by Model", acc_series, "accuracy")
     line_chart(os.path.join(out_dir, "test_loss_by_model.svg"), "Test Loss by Model", loss_series, "loss")
 
