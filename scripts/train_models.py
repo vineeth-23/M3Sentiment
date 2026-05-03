@@ -23,6 +23,8 @@ from m3sentiment.training import (
     train_standard_epoch,
 )
 from m3sentiment.evaluation import (
+    collect_confusion_matrix,
+    confusion_matrix_rows,
     evaluate_auxiliary_epoch,
     evaluate_orthogonality_epoch,
     evaluate_standard_epoch,
@@ -40,6 +42,70 @@ def save_final_model_weights(model, fname):
     os.makedirs(os.path.dirname(fname), exist_ok=True)
     torch.save(model.state_dict(), fname)
 
+
+
+def render_confusion_matrix_svg(confusion_matrix, out_path, title, class_names=None):
+    class_names = class_names or ["negative", "neutral", "positive"]
+    width, height = 720, 620
+    left, top = 190, 120
+    cell_size = 115
+    max_count = max((count for row in confusion_matrix for count in row), default=1) or 1
+
+    def svg_text(x, y, text, size=13, weight="400", anchor="middle", fill="#111827"):
+        text = str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return (
+            f'<text x="{x}" y="{y}" font-size="{size}" font-weight="{weight}" '
+            f'text-anchor="{anchor}" fill="{fill}">{text}</text>'
+        )
+
+    body = [
+        '<rect width="100%" height="100%" fill="#ffffff"/>',
+        svg_text(width / 2, 40, title, size=22, weight="700"),
+        svg_text(left + cell_size * 1.5, 82, "Predicted label", size=15, weight="700"),
+        svg_text(35, top + cell_size * 1.5, "Actual label", size=15, weight="700", anchor="start"),
+    ]
+
+    for idx, class_name in enumerate(class_names):
+        body.append(svg_text(left + idx * cell_size + cell_size / 2, top - 22, class_name, size=13, weight="700"))
+        body.append(svg_text(left - 18, top + idx * cell_size + cell_size / 2 + 5, class_name, size=13, weight="700", anchor="end"))
+
+    for actual_idx, row in enumerate(confusion_matrix):
+        row_total = sum(row)
+        for predicted_idx, count in enumerate(row):
+            intensity = count / max_count
+            red = int(239 - intensity * 170)
+            green = int(246 - intensity * 170)
+            blue = 255
+            fill = f"rgb({red},{green},{blue})"
+            x = left + predicted_idx * cell_size
+            y = top + actual_idx * cell_size
+            percent = count / row_total if row_total else 0.0
+            body.append(f'<rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" fill="{fill}" stroke="#ffffff" stroke-width="3"/>')
+            body.append(svg_text(x + cell_size / 2, y + cell_size / 2 - 8, count, size=22, weight="700"))
+            body.append(svg_text(x + cell_size / 2, y + cell_size / 2 + 20, f"{percent:.1%}", size=12, fill="#374151"))
+
+    body.append(svg_text(left, height - 60, "Each row sums across predictions for one true class; percentages are row-normalized.", size=12, anchor="start", fill="#4b5563"))
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w") as svg_file:
+        svg_file.write(
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+            f'viewBox="0 0 {width} {height}" font-family="Arial, sans-serif">\n'
+            + "\n".join(body)
+            + "\n</svg>\n"
+        )
+
+
+def save_test_confusion_matrix(model, test_loader, device, args, model_name, display_name):
+    class_names = ["negative", "neutral", "positive"]
+    matrix = collect_confusion_matrix(model, test_loader, device, num_classes=len(class_names))
+    rows = confusion_matrix_rows(matrix, class_names=class_names)
+
+    csv_path = os.path.join(args.metrics_dir, "confusion_matrices", f"{model_name}_test_confusion_matrix.csv")
+    svg_path = os.path.join(args.plot_dir, f"{model_name}_test_confusion_matrix.svg")
+    write_metrics_csv(rows, csv_path)
+    render_confusion_matrix_svg(matrix, svg_path, f"{display_name} Test Confusion Matrix", class_names)
+    return csv_path, svg_path
 
 def _load_torch_checkpoint(path, device):
     try:
@@ -203,6 +269,7 @@ def run_late_fusion_experiment(config, dataset_path, args):
     # Final evaluation and save results
     test_loss, test_acc = evaluate_standard_epoch(model, test_loader, criterion, device)
     print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
+    save_test_confusion_matrix(model, test_loader, device, args, "baseline1", "Baseline 1")
     if diagnostics is not None:
         diagnostics.finalize(model)
     save_final_model_weights(model, os.path.join(args.model_dir, "baseline1.pth"))
@@ -281,6 +348,7 @@ def run_cross_modal_experiment(config, dataset_path, args):
     # Final evaluation and save results
     test_loss, test_acc = evaluate_standard_epoch(model, test_loader, criterion, device)
     print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
+    save_test_confusion_matrix(model, test_loader, device, args, "baseline2", "Baseline 2")
     if diagnostics is not None:
         diagnostics.finalize(model)
     save_final_model_weights(model, os.path.join(args.model_dir, "baseline2.pth"))
@@ -366,6 +434,7 @@ def run_orthogonality_experiment(config, dataset_path, args):
     # Final evaluation and save results
     test_loss, test_acc = evaluate_orthogonality_epoch(model, test_loader, criterion, device)
     print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
+    save_test_confusion_matrix(model, test_loader, device, args, "orthogonality", "Orthogonality")
     if diagnostics is not None:
         diagnostics.finalize(model)
     save_final_model_weights(model, os.path.join(args.model_dir, "improved_ortho.pth"))
@@ -448,6 +517,7 @@ def run_auxiliary_experiment(config, dataset_path, args):
     # Final evaluation and save results
     test_loss, test_acc = evaluate_auxiliary_epoch(model, test_loader, criterion, device)
     print(f"\nTest ▶ loss={test_loss:.4f} acc={test_acc:.4f}")
+    save_test_confusion_matrix(model, test_loader, device, args, "auxiliary", "Auxiliary Heads")
     if diagnostics is not None:
         diagnostics.finalize(model)
     save_final_model_weights(model, os.path.join(args.model_dir, "improved_aux.pth"))
@@ -471,6 +541,7 @@ if __name__ == "__main__":
     parser.add_argument('--metrics-dir', default="outputs/metrics", help='Directory used for metric and diagnostic CSV files')
     parser.add_argument('--model-dir', default="outputs/model_weights", help='Directory used for final trained model weights')
     parser.add_argument('--checkpoint-dir', default="outputs/checkpoints", help='Directory used for resumable training checkpoints')
+    parser.add_argument('--plot-dir', default="outputs/plots/diagnostics", help='Directory used for generated diagnostic SVG plots')
     parser.add_argument('--resume', action='store_true', help='Resume training from the latest checkpoint for the selected model')
     parser.add_argument('--resume-checkpoint', default=None, help='Optional explicit checkpoint path to resume from')
     args = parser.parse_args()
