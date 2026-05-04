@@ -11,6 +11,38 @@ COLORS = [
     "#0891b2", "#4f46e5", "#be123c", "#65a30d", "#0f766e",
 ]
 
+MODEL_DISPLAY_NAMES = {
+    "late_fusion": "Late Fusion",
+    "cross_modal": "Cross-Modal Fusion",
+    "ortho_fusion": "Ortho Fusion",
+    "aux_fusion": "Aux Fusion",
+}
+
+LEGACY_MODEL_NAMES = {
+    "baseline1": "late_fusion",
+    "baseline2": "cross_modal",
+    "improved_ortho": "ortho_fusion",
+    "orthogonality": "ortho_fusion",
+    "improved_aux": "aux_fusion",
+    "auxiliary": "aux_fusion",
+}
+
+
+def canonical_model_name(model_name):
+    return LEGACY_MODEL_NAMES.get(model_name, model_name)
+
+
+def display_model_name(model_name):
+    return MODEL_DISPLAY_NAMES.get(canonical_model_name(model_name), model_name.replace("_", " ").title())
+
+
+def first_existing_csv(csv_dir, filenames):
+    for filename in filenames:
+        path = os.path.join(csv_dir, filename)
+        if os.path.exists(path):
+            return path
+    return os.path.join(csv_dir, filenames[0])
+
 
 def read_csv(path):
     with open(path, newline="") as f:
@@ -213,29 +245,29 @@ def heatmap(path, title, rows, cols, values):
 
 def plot_training_metrics(csv_dir, out_dir):
     metric_files = {
-        "baseline1": "baseline1_metrics.csv",
-        "baseline2": "baseline2_metrics.csv",
-        "orthogonality": "ortho_metrics.csv",
-        "auxiliary": "aux_metrics.csv",
+        "late_fusion": ["late_fusion_metrics.csv", "baseline1_metrics.csv"],
+        "cross_modal": ["cross_modal_metrics.csv", "baseline2_metrics.csv"],
+        "ortho_fusion": ["ortho_fusion_metrics.csv", "ortho_metrics.csv"],
+        "aux_fusion": ["aux_fusion_metrics.csv", "aux_metrics.csv"],
     }
     train_acc_series = {}
     validation_acc_series = {}
     acc_series = {}
     loss_series = {}
 
-    for name, filename in metric_files.items():
-        path = os.path.join(csv_dir, filename)
+    for name, filenames in metric_files.items():
+        path = first_existing_csv(csv_dir, filenames)
         if not os.path.exists(path):
             continue
         rows = read_csv(path)
         if rows and "train_acc" in rows[0]:
-            train_acc_series[name] = [(to_float(r["epoch"]), to_float(r["train_acc"])) for r in rows]
+            train_acc_series[display_model_name(name)] = [(to_float(r["epoch"]), to_float(r["train_acc"])) for r in rows]
         if rows and "val_acc" in rows[0]:
-            validation_acc_series[name] = [(to_float(r["epoch"]), to_float(r["val_acc"])) for r in rows]
+            validation_acc_series[display_model_name(name)] = [(to_float(r["epoch"]), to_float(r["val_acc"])) for r in rows]
         if rows and "test_acc" in rows[0]:
-            acc_series[f"{name} test"] = [(to_float(r["epoch"]), to_float(r["test_acc"])) for r in rows]
+            acc_series[f"{display_model_name(name)} test"] = [(to_float(r["epoch"]), to_float(r["test_acc"])) for r in rows]
         if rows and "test_loss" in rows[0]:
-            loss_series[f"{name} test"] = [(to_float(r["epoch"]), to_float(r["test_loss"])) for r in rows]
+            loss_series[f"{display_model_name(name)} test"] = [(to_float(r["epoch"]), to_float(r["test_loss"])) for r in rows]
 
         component_series = {}
         for col in [
@@ -248,7 +280,7 @@ def plot_training_metrics(csv_dir, out_dir):
         if component_series:
             line_chart(
                 os.path.join(out_dir, f"{name}_loss_components.svg"),
-                f"{name.title()} Loss Components",
+                f"{display_model_name(name)} Loss Components",
                 component_series,
                 "loss",
             )
@@ -286,15 +318,15 @@ def smooth_series(points, window=20):
 
 def plot_batch_metrics(csv_dir, out_dir):
     batch_files = {
-        "baseline1": "baseline1_batch_metrics.csv",
-        "baseline2": "baseline2_batch_metrics.csv",
-        "orthogonality": "ortho_batch_metrics.csv",
-        "auxiliary": "aux_batch_metrics.csv",
+        "late_fusion": ["late_fusion_batch_metrics.csv", "baseline1_batch_metrics.csv"],
+        "cross_modal": ["cross_modal_batch_metrics.csv", "baseline2_batch_metrics.csv"],
+        "ortho_fusion": ["ortho_fusion_batch_metrics.csv", "ortho_batch_metrics.csv"],
+        "aux_fusion": ["aux_fusion_batch_metrics.csv", "aux_batch_metrics.csv"],
     }
 
     total_loss_series = {}
-    for model_name, filename in batch_files.items():
-        path = os.path.join(csv_dir, filename)
+    for model_name, filenames in batch_files.items():
+        path = first_existing_csv(csv_dir, filenames)
         if not os.path.exists(path):
             continue
         rows = read_csv(path)
@@ -307,7 +339,7 @@ def plot_batch_metrics(csv_dir, out_dir):
 
         if "total_loss" in rows[0]:
             points = [(x_value(row, idx), to_float(row["total_loss"])) for idx, row in enumerate(rows)]
-            total_loss_series[model_name] = smooth_series(points)
+            total_loss_series[display_model_name(model_name)] = smooth_series(points)
 
         component_cols = [
             "classification_loss", "ortho_loss_raw", "ortho_loss_weighted",
@@ -322,7 +354,7 @@ def plot_batch_metrics(csv_dir, out_dir):
         if component_series:
             line_chart(
                 os.path.join(out_dir, f"{model_name}_batch_loss_components.svg"),
-                f"{model_name.title()} Batch Loss Components",
+                f"{display_model_name(model_name)} Batch Loss Components",
                 component_series,
                 "loss",
             )
@@ -346,7 +378,7 @@ def plot_batch_metrics(csv_dir, out_dir):
             if epoch_series:
                 line_chart(
                     os.path.join(out_dir, f"{model_name}_loss_components.svg"),
-                    f"{model_name.title()} Epoch Loss Components",
+                    f"{display_model_name(model_name)} Epoch Loss Components",
                     epoch_series,
                     "loss",
                 )
@@ -355,8 +387,8 @@ def plot_batch_metrics(csv_dir, out_dir):
             acc_points = [(x_value(row, idx), to_float(row["batch_acc"])) for idx, row in enumerate(rows)]
             line_chart(
                 os.path.join(out_dir, f"{model_name}_batch_accuracy.svg"),
-                f"{model_name.title()} Batch Accuracy",
-                {model_name: smooth_series(acc_points)},
+                f"{display_model_name(model_name)} Batch Accuracy",
+                {display_model_name(model_name): smooth_series(acc_points)},
                 "accuracy",
             )
 
@@ -378,13 +410,13 @@ def parse_diag_filename(path):
             break
     if "_batch_" in base:
         model, step = base.split("_batch_", 1)
-        return model, f"batch_{step}"
+        return canonical_model_name(model), f"batch_{step}"
     if "_epoch_" in base:
         model, epoch = base.split("_epoch_", 1)
-        return model, f"epoch_{epoch}"
+        return canonical_model_name(model), f"epoch_{epoch}"
     if base.endswith("_final"):
-        return base[:-6], "final"
-    return base, "unknown"
+        return canonical_model_name(base[:-6]), "final"
+    return canonical_model_name(base), "unknown"
 
 
 def stage_sort_key(stage):
@@ -434,7 +466,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
         if ortho_series:
             line_chart(
                 os.path.join(out_dir, f"{model}_orthogonality_over_training.svg"),
-                f"{model} Orthogonality Over Training",
+                f"{display_model_name(model)} Orthogonality Over Training",
                 dict(ortho_series),
                 "similarity",
             )
@@ -448,7 +480,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
         if attention_over_time:
             line_chart(
                 os.path.join(out_dir, f"{model}_cross_attention_over_training.svg"),
-                f"{model} Cross-Modal Attention Over Training",
+                f"{display_model_name(model)} Cross-Modal Attention Over Training",
                 dict(attention_over_time),
                 "attention weight",
             )
@@ -461,7 +493,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
         if fusion_over_time:
             line_chart(
                 os.path.join(out_dir, f"{model}_fusion_attention_over_training.svg"),
-                f"{model} Fusion Attention Over Training",
+                f"{display_model_name(model)} Fusion Attention Over Training",
                 dict(fusion_over_time),
                 "attention weight",
             )
@@ -506,7 +538,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
         if attention_groups:
             grouped_bar_chart(
                 os.path.join(out_dir, f"{model}_final_cross_attention.svg"),
-                f"{model} Final Cross-Modal Attention",
+                f"{display_model_name(model)} Final Cross-Modal Attention",
                 dict(attention_groups),
                 "attention weight",
                 y_max=1.0,
@@ -519,7 +551,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
         if fusion_groups:
             grouped_bar_chart(
                 os.path.join(out_dir, f"{model}_final_fusion_attention.svg"),
-                f"{model} Final Fusion Attention",
+                f"{display_model_name(model)} Final Fusion Attention",
                 dict(fusion_groups),
                 "attention weight",
                 y_max=1.0,
@@ -537,7 +569,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
         if self_attention_groups:
             grouped_bar_chart(
                 os.path.join(out_dir, f"{model}_final_self_attention_summary.svg"),
-                f"{model} Final Within-Modality Attention",
+                f"{display_model_name(model)} Final Within-Modality Attention",
                 dict(self_attention_groups),
                 "value",
             )
@@ -555,7 +587,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
                 heat_values[(row_label, col_label)] = to_float(row["value"])
             heatmap(
                 os.path.join(out_dir, f"{model}_final_head_attention_heatmap.svg"),
-                f"{model} Final Head-Wise Attention",
+                f"{display_model_name(model)} Final Head-Wise Attention",
                 sorted(set(row_labels)),
                 sorted(set(col_labels)),
                 heat_values,
@@ -577,7 +609,7 @@ def plot_diagnostic_metrics(csv_dir, out_dir):
                 heat_values[(row_label, col_label)] = to_float(row["value"])
             heatmap(
                 os.path.join(out_dir, f"{model}_final_fusion_head_attention_heatmap.svg"),
-                f"{model} Final Fusion Head Attention",
+                f"{display_model_name(model)} Final Fusion Head Attention",
                 sorted(set(row_labels)),
                 sorted(set(col_labels)),
                 heat_values,

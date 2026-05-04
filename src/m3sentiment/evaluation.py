@@ -26,7 +26,7 @@ def evaluate_standard_epoch(model, loader, criterion, device):
     return total_loss / sample_count, total_correct / sample_count
 
 
-def evaluate_orthogonality_epoch(model, loader, criterion, device):
+def evaluate_ortho_fusion_epoch(model, loader, criterion, device):
     model.eval()
     total_loss = 0.0
     total_correct = 0
@@ -51,7 +51,7 @@ def evaluate_orthogonality_epoch(model, loader, criterion, device):
     return total_loss / sample_count, total_correct / sample_count
 
 
-def evaluate_auxiliary_epoch(model, loader, criterion, device):
+def evaluate_aux_fusion_epoch(model, loader, criterion, device):
     model.eval()
     total_loss = 0.0
     total_correct = 0
@@ -115,5 +115,7 @@ def confusion_matrix_rows(confusion_matrix, class_names=None):
 
 # Backward-compatible aliases for older notebooks or scripts.
 eval_epoch = evaluate_standard_epoch
-eval_epoch_ortho = evaluate_orthogonality_epoch
-eval_epoch_aux = evaluate_auxiliary_epoch
+evaluate_orthogonality_epoch = evaluate_ortho_fusion_epoch
+eval_epoch_ortho = evaluate_ortho_fusion_epoch
+evaluate_auxiliary_epoch = evaluate_aux_fusion_epoch
+eval_epoch_aux = evaluate_aux_fusion_epoch

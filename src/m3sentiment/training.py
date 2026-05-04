@@ -80,7 +80,7 @@ def train_standard_epoch(model, loader, optimizer, criterion, device, max_grad_n
     return total_loss / sample_count, total_correct / sample_count
 
 
-def train_orthogonality_epoch(model, loader, optimizer, criterion, device, ortho_weight: float = 0.1, max_grad_norm: float = 1.0, diagnostics=None, epoch=None, batch_metrics=None):
+def train_ortho_fusion_epoch(model, loader, optimizer, criterion, device, ortho_weight: float = 0.1, max_grad_norm: float = 1.0, diagnostics=None, epoch=None, batch_metrics=None):
     model.train()
     total_loss = 0.0
     classification_loss_sum = 0.0
@@ -154,7 +154,7 @@ def train_orthogonality_epoch(model, loader, optimizer, criterion, device, ortho
     )
 
 
-def train_auxiliary_epoch(model, loader, optimizer, criterion, device, aux_weight: float = 0.05, max_grad_norm: float = 1.0, diagnostics=None, epoch=None, batch_metrics=None):
+def train_aux_fusion_epoch(model, loader, optimizer, criterion, device, aux_weight: float = 0.05, max_grad_norm: float = 1.0, diagnostics=None, epoch=None, batch_metrics=None):
     model.train()
     total_loss = 0.0
     main_loss_sum = 0.0
@@ -234,5 +234,7 @@ def train_auxiliary_epoch(model, loader, optimizer, criterion, device, aux_weigh
 
 # Backward-compatible aliases for older notebooks or scripts.
 train_epoch = train_standard_epoch
-train_epoch_ortho = train_orthogonality_epoch
-train_epoch_aux = train_auxiliary_epoch
+train_orthogonality_epoch = train_ortho_fusion_epoch
+train_epoch_ortho = train_ortho_fusion_epoch
+train_auxiliary_epoch = train_aux_fusion_epoch
+train_epoch_aux = train_aux_fusion_epoch

@@ -11,10 +11,10 @@ The project focuses on two questions:
 
 ## Model Variants
 
-- **Baseline 1: Late Fusion Transformer** combines separately encoded text, audio, and vision representations with a final fusion transformer.
-- **Baseline 2: Cross-Modal Attention** lets each modality attend to the other modalities before classification.
-- **Improved 1: Orthogonality Loss** adds a penalty that pushes text/audio/vision representations to become less redundant.
-- **Improved 2: Auxiliary Heads** adds text-only, audio-only, and vision-only auxiliary classifiers during training.
+- **Late Fusion** combines separately encoded text, audio, and vision representations with a final fusion transformer.
+- **Cross-Modal Fusion** lets each modality attend to the other modalities before classification.
+- **Ortho Fusion** adds an orthogonality penalty that pushes text/audio/vision representations to become less redundant.
+- **Aux Fusion** adds text-only, audio-only, and vision-only auxiliary classifiers during training.
 
 ## Installation
 
@@ -60,25 +60,25 @@ data/scripts/
 
 Run commands from the project root.
 
-Baseline 1:
+Late Fusion:
 
 ```bash
 python scripts/train_models.py --run1
 ```
 
-Baseline 2:
+Cross-Modal Fusion:
 
 ```bash
 python scripts/train_models.py --run2
 ```
 
-Orthogonality model:
+Ortho Fusion model:
 
 ```bash
 python scripts/train_models.py --run3
 ```
 
-Auxiliary-heads model:
+Aux Fusion model:
 
 ```bash
 python scripts/train_models.py --run4
@@ -96,8 +96,8 @@ Diagnostics run by default on the training split. They include:
 
 - modality-only diagnostic losses: `text_only_loss`, `audio_only_loss`, `vision_only_loss`
 - within-modality self-attention summaries
-- Baseline 1 fusion attention
-- cross-modal attention for Baseline 2, Orthogonality, and Auxiliary models
+- Late Fusion fusion attention
+- cross-modal attention for Cross-Modal Fusion, Ortho Fusion, and Aux Fusion models
 - orthogonality/cosine-similarity measurements between text/audio/vision representations
 - batch snapshots at `1, 5, 10, 25, 50, 100, 250, 500, 1000`
 - epoch-level snapshots
@@ -204,9 +204,9 @@ M3Sentiment/
 │       ├── training.py
 │       └── models/
 │           ├── late_fusion.py
-│           ├── cross_modal_attention.py
-│           ├── orthogonality.py
-│           └── auxiliary_heads.py
+│           ├── cross_modal.py
+│           ├── ortho_fusion.py
+│           └── aux_fusion.py
 ├── requirements.txt
 └── README.md
 ```
