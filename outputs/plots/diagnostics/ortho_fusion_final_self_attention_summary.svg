@@ -13,30 +13,30 @@
 <line x1="80" y1="162.5" x2="840" y2="162.5" stroke="#e5e7eb"/>
 <text x="72" y="166.5" font-size="11" font-weight="400" text-anchor="end" fill="#4b5563">2.90</text>
 <line x1="80" y1="70.0" x2="840" y2="70.0" stroke="#e5e7eb"/>
-<text x="72" y="74.0" font-size="11" font-weight="400" text-anchor="end" fill="#4b5563">3.87</text>
-<rect x="101.33" y="70.00" width="22.40" height="370.00" fill="#2563eb"/>
-<rect x="129.33" y="438.09" width="22.40" height="1.91" fill="#dc2626"/>
-<rect x="157.33" y="438.13" width="22.40" height="1.87" fill="#16a34a"/>
+<text x="72" y="74.0" font-size="11" font-weight="400" text-anchor="end" fill="#4b5563">3.86</text>
+<rect x="101.33" y="70.63" width="22.40" height="369.37" fill="#2563eb"/>
+<rect x="129.33" y="438.08" width="22.40" height="1.92" fill="#dc2626"/>
+<rect x="157.33" y="438.21" width="22.40" height="1.79" fill="#16a34a"/>
 <text x="143.33333333333334" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">audio layer 0</text>
-<rect x="228.00" y="74.06" width="22.40" height="365.94" fill="#2563eb"/>
-<rect x="256.00" y="438.09" width="22.40" height="1.91" fill="#dc2626"/>
-<rect x="284.00" y="438.18" width="22.40" height="1.82" fill="#16a34a"/>
+<rect x="228.00" y="70.00" width="22.40" height="370.00" fill="#2563eb"/>
+<rect x="256.00" y="438.08" width="22.40" height="1.92" fill="#dc2626"/>
+<rect x="284.00" y="438.20" width="22.40" height="1.80" fill="#16a34a"/>
 <text x="270.0" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">audio layer 1</text>
-<rect x="354.67" y="91.68" width="22.40" height="348.32" fill="#2563eb"/>
+<rect x="354.67" y="89.88" width="22.40" height="350.12" fill="#2563eb"/>
 <rect x="382.67" y="438.08" width="22.40" height="1.92" fill="#dc2626"/>
-<rect x="410.67" y="438.19" width="22.40" height="1.81" fill="#16a34a"/>
+<rect x="410.67" y="438.10" width="22.40" height="1.90" fill="#16a34a"/>
 <text x="396.6666666666667" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">text layer 0</text>
-<rect x="481.33" y="74.96" width="22.40" height="365.04" fill="#2563eb"/>
-<rect x="509.33" y="438.09" width="22.40" height="1.91" fill="#dc2626"/>
-<rect x="537.33" y="438.15" width="22.40" height="1.85" fill="#16a34a"/>
+<rect x="481.33" y="74.77" width="22.40" height="365.23" fill="#2563eb"/>
+<rect x="509.33" y="438.08" width="22.40" height="1.92" fill="#dc2626"/>
+<rect x="537.33" y="438.09" width="22.40" height="1.91" fill="#16a34a"/>
 <text x="523.3333333333334" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">text layer 1</text>
-<rect x="608.00" y="72.09" width="22.40" height="367.91" fill="#2563eb"/>
-<rect x="636.00" y="438.09" width="22.40" height="1.91" fill="#dc2626"/>
-<rect x="664.00" y="438.09" width="22.40" height="1.91" fill="#16a34a"/>
+<rect x="608.00" y="74.14" width="22.40" height="365.86" fill="#2563eb"/>
+<rect x="636.00" y="438.08" width="22.40" height="1.92" fill="#dc2626"/>
+<rect x="664.00" y="438.28" width="22.40" height="1.72" fill="#16a34a"/>
 <text x="650.0000000000001" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">vision layer 0</text>
-<rect x="734.67" y="70.81" width="22.40" height="369.19" fill="#2563eb"/>
-<rect x="762.67" y="438.09" width="22.40" height="1.91" fill="#dc2626"/>
-<rect x="790.67" y="438.05" width="22.40" height="1.95" fill="#16a34a"/>
+<rect x="734.67" y="70.03" width="22.40" height="369.97" fill="#2563eb"/>
+<rect x="762.67" y="438.08" width="22.40" height="1.92" fill="#dc2626"/>
+<rect x="790.67" y="438.17" width="22.40" height="1.83" fill="#16a34a"/>
 <text x="776.6666666666667" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">vision layer 1</text>
 <rect x="875" y="65" width="12" height="12" fill="#2563eb"/>
 <text x="895" y="75" font-size="12" font-weight="400" text-anchor="start" fill="#111827">mean_entropy</text>

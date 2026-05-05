@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="620" viewBox="0 0 720 620" font-family="Arial, sans-serif">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="360.0" y="40" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">Cross-Modal Fusion Test Confusion Matrix</text>
+<text x="362.5" y="82" font-size="15" font-weight="700" text-anchor="middle" fill="#111827">Predicted label</text>
+<text x="35" y="292.5" font-size="15" font-weight="700" text-anchor="start" fill="#111827">Actual label</text>
+<text x="247.5" y="98" font-size="13" font-weight="700" text-anchor="middle" fill="#111827">negative</text>
+<text x="172" y="182.5" font-size="13" font-weight="700" text-anchor="end" fill="#111827">negative</text>
+<text x="362.5" y="98" font-size="13" font-weight="700" text-anchor="middle" fill="#111827">neutral</text>
+<text x="172" y="297.5" font-size="13" font-weight="700" text-anchor="end" fill="#111827">neutral</text>
+<text x="477.5" y="98" font-size="13" font-weight="700" text-anchor="middle" fill="#111827">positive</text>
+<text x="172" y="412.5" font-size="13" font-weight="700" text-anchor="end" fill="#111827">positive</text>
+<rect x="190" y="120" width="115" height="115" fill="rgb(148,155,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="247.5" y="169.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">982</text>
+<text x="247.5" y="197.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">72.7%</text>
+<rect x="305" y="120" width="115" height="115" fill="rgb(228,235,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="362.5" y="169.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">111</text>
+<text x="362.5" y="197.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">8.2%</text>
+<rect x="420" y="120" width="115" height="115" fill="rgb(215,222,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="477.5" y="169.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">257</text>
+<text x="477.5" y="197.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">19.0%</text>
+<rect x="190" y="235" width="115" height="115" fill="rgb(220,227,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="247.5" y="284.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">202</text>
+<text x="247.5" y="312.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">19.7%</text>
+<rect x="305" y="235" width="115" height="115" fill="rgb(210,217,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="362.5" y="284.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">314</text>
+<text x="362.5" y="312.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">30.6%</text>
+<rect x="420" y="235" width="115" height="115" fill="rgb(192,199,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="477.5" y="284.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">509</text>
+<text x="477.5" y="312.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">49.7%</text>
+<rect x="190" y="350" width="115" height="115" fill="rgb(219,226,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="247.5" y="399.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">213</text>
+<text x="247.5" y="427.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">9.3%</text>
+<rect x="305" y="350" width="115" height="115" fill="rgb(218,225,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="362.5" y="399.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">227</text>
+<text x="362.5" y="427.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">9.9%</text>
+<rect x="420" y="350" width="115" height="115" fill="rgb(69,76,255)" stroke="#ffffff" stroke-width="3"/>
+<text x="477.5" y="399.5" font-size="22" font-weight="700" text-anchor="middle" fill="#111827">1844</text>
+<text x="477.5" y="427.5" font-size="12" font-weight="400" text-anchor="middle" fill="#374151">80.7%</text>
+<text x="190" y="560" font-size="12" font-weight="400" text-anchor="start" fill="#4b5563">Each row sums across predictions for one true class; percentages are row-normalized.</text>
+</svg>

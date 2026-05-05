@@ -15,15 +15,15 @@
 <line x1="80" y1="70.0" x2="840" y2="70.0" stroke="#e5e7eb"/>
 <text x="72" y="74.0" font-size="11" font-weight="400" text-anchor="end" fill="#4b5563">1.00</text>
 <rect x="164.67" y="440.00" width="22.40" height="0.00" fill="#2563eb"/>
-<rect x="192.67" y="213.60" width="22.40" height="226.40" fill="#dc2626"/>
-<rect x="220.67" y="296.40" width="22.40" height="143.60" fill="#16a34a"/>
+<rect x="192.67" y="235.20" width="22.40" height="204.80" fill="#dc2626"/>
+<rect x="220.67" y="274.80" width="22.40" height="165.20" fill="#16a34a"/>
 <text x="206.66666666666669" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">audio</text>
-<rect x="418.00" y="259.58" width="22.40" height="180.42" fill="#2563eb"/>
+<rect x="418.00" y="257.19" width="22.40" height="182.81" fill="#2563eb"/>
 <rect x="446.00" y="440.00" width="22.40" height="0.00" fill="#dc2626"/>
-<rect x="474.00" y="250.42" width="22.40" height="189.58" fill="#16a34a"/>
+<rect x="474.00" y="252.81" width="22.40" height="187.19" fill="#16a34a"/>
 <text x="460.00000000000006" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">text</text>
-<rect x="671.33" y="300.96" width="22.40" height="139.04" fill="#2563eb"/>
-<rect x="699.33" y="209.04" width="22.40" height="230.96" fill="#dc2626"/>
+<rect x="671.33" y="285.67" width="22.40" height="154.33" fill="#2563eb"/>
+<rect x="699.33" y="224.33" width="22.40" height="215.67" fill="#dc2626"/>
 <rect x="727.33" y="440.00" width="22.40" height="0.00" fill="#16a34a"/>
 <text x="713.3333333333334" y="464" font-size="11" font-weight="400" text-anchor="middle" fill="#374151">vision</text>
 <rect x="875" y="65" width="12" height="12" fill="#2563eb"/>

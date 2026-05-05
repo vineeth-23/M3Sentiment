@@ -1,10 +1,10 @@
 {
     "train": {
         "batch_size": 64,
-        "lr": 3e-05,
-        "epochs": 50,
+        "lr": 2e-5,
+        "epochs": 40,
         "max_grad_norm": 1.0,
-        "ortho_weight": 90,
+        "ortho_weight": 100,
         "aux_weight": 0.05
     },
     "model": {
